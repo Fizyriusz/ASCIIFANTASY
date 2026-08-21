@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>NEON GRID // walkable ASCII city</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;
+    font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;color:#3fe0d0;}
+  #c{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair;}
+  .ui{position:fixed;pointer-events:none;font-size:11px;line-height:1.6;letter-spacing:.06em;
+      text-shadow:0 0 8px rgba(0,255,220,.35);}
+  #hud{left:12px;top:10px;color:#2fd6c2;opacity:.7;}
+  #keys{right:12px;top:10px;text-align:right;color:#7a7f8a;opacity:.65;}
+  #splash{left:0;right:0;top:38%;text-align:center;color:#e8f6ff;opacity:1;
+      transition:opacity 1.2s ease 3s;font-size:13px;letter-spacing:.35em;}
+  #splash b{display:block;font-size:26px;letter-spacing:.5em;color:#4ff;margin-bottom:14px;
+      text-shadow:0 0 22px rgba(0,255,255,.5)}
+  #splash.gone{opacity:0}
+  #tips{left:12px;bottom:10px;color:#6b7280;opacity:.55}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" class="ui"></div>
+<div id="keys" class="ui">WASD / strzałki &nbsp;·&nbsp; mysz = rozglądanie<br>SHIFT bieg &nbsp;·&nbsp; [ ] rozdzielczość<br>B bloom &nbsp;·&nbsp; R nowe miasto &nbsp;·&nbsp; F fullscreen</div>
+<div id="splash" class="ui"><b>NEON GRID</b>ASCII CITY &nbsp;/&nbsp; KLIKNIJ ABY WEJŚĆ</div>
+<div id="tips" class="ui">mobile: lewa połowa = ruch, prawa = rozglądanie</div>
+<script>
+(function(){
+'use strict';
+
+/* ============================================================
+   NEON GRID — walkable ASCII city, one file, no libraries.
+   Silnik: DDA raycasting po siatce z wysokościami + floor-casting,
+   render do bufora znaków, blit przez fillText z run-length.
+   ============================================================ */
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', {alpha:false});
+const hud = document.getElementById('hud');
+
+const CFG = {
+  targetCols: 150,
+  fov: 74 * Math.PI/180,
+  maxDepth: 62,
+  eye: 0.45,          // 1 komórka siatki = 4 m  →  oko ~1.8 m
+  speed: 3.0,
+  runMul: 2.4,
+  bloom: true,
+  fogDist: 30
+};
+
+/* ---------------- hash / noise ---------------- */
+function h32(a,b,c,d){
+  let x = Math.imul(a|0,0x27d4eb2d) ^ Math.imul(b|0,0x165667b1)
+        ^ Math.imul(c|0,0x9e3779b1) ^ Math.imul(d|0,0x85ebca6b);
+  x ^= x>>>15; x = Math.imul(x,0x2545f491);
+  x ^= x>>>13; x = Math.imul(x,0x27d4eb2d);
+  x ^= x>>>16; return x>>>0;
+}
+const rnd01 = (a,b,c,d)=> h32(a,b,c,d)/4294967296;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t;
+  return ((t^t>>>14)>>>0)/4294967296;};}
+function vnoise(x,y,s){
+  const x0=Math.floor(x), y0=Math.floor(y), fx=x-x0, fy=y-y0;
+  const m=15;
+  const a=rnd01(x0&m,y0&m,s,0), b=rnd01((x0+1)&m,y0&m,s,0),
+        c=rnd01(x0&m,(y0+1)&m,s,0), d=rnd01((x0+1)&m,(y0+1)&m,s,0);
+  const u=fx*fx*(3-2*fx), v=fy*fy*(3-2*fy);
+  return (a*(1-u)+b*u)*(1-v)+(c*(1-u)+d*u)*v;
+}
+
+/* ---------------- świat ---------------- */
+const N = 128, MASK = N-1, BX = 8, BY = 8;
+const T_ROAD=0, T_WALK=1, T_LOT=2, T_BLD=3, T_TREE=4, T_PLAZA=5;
+
+const tType  = new Uint8Array(N*N);
+const tH     = new Float32Array(N*N);
+const tCol   = new Uint8Array(N*N);
+const tStyle = new Uint8Array(N*N);
+const tSeed  = new Uint32Array(N*N);
+const tBand  = new Float32Array(N*N);
+const tBandC = new Uint8Array(N*N);
+const tMast  = new Float32Array(N*N);
+
+const idx = (x,y)=> ((y&MASK)*N + (x&MASK));
+
+// paleta neonów
+const PAL = [
+  [ 45,225,255], //0 cyan
+  [245,222, 72], //1 yellow
+  [ 62,110,255], //2 blue
+  [255, 78, 58], //3 red
+  [255,152, 46], //4 amber
+  [ 74,255,130], //5 green
+  [255, 62,222], //6 magenta
+  [162,102,255], //7 violet
+  [232,244,255], //8 white
+  [ 40,255,208]  //9 teal
+];
+const GREY = [168,182,192];
+
+const STYLES = [
+  {a:48,b:111}, // 0 o
+  {a:88,b:120}, // X x
+  {a:56,b:56 }, // 8 8
+  {a:90,b:122}, // Z z
+  {a:35,b:43 }, // # +
+  {a:65,b:94 }, // A ^
+  {a:83,b:115}, // S s
+  {a:71,b:103}, // G g
+  {a:38,b:61 }, // & =
+  {a:37,b:58 }  // % :
+];
+
+function isRoadCol(x){ return (x&(BX-1))===0 || ((x-1)%(BX*4)===0 && x>0); }
+function isRoadRow(y){ return (y&(BY-1))===0 || ((y-1)%(BY*4)===0 && y>0); }
+
+function buildCity(seed){
+  const R = mulberry32(seed);
+  // 1. ulice, chodniki, działki
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+    const i=y*N+x;
+    tType[i] = (isRoadCol(x)||isRoadRow(y)) ? T_ROAD : T_LOT;
+    tH[i]=0; tBand[i]=0; tMast[i]=0;
+  }
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+    const i=y*N+x;
+    if(tType[i]!==T_LOT) continue;
+    if(tType[idx(x+1,y)]===T_ROAD||tType[idx(x-1,y)]===T_ROAD||
+       tType[idx(x,y+1)]===T_ROAD||tType[idx(x,y-1)]===T_ROAD) tType[i]=T_WALK;
+  }
+  // 2. budynki na działkach
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+    if(tType[y*N+x]!==T_LOT) continue;
+    let w = 1 + ((R()*3)|0), h = 1 + ((R()*3)|0);
+    while(w>1){ let ok=true;
+      for(let k=0;k<w;k++) if(x+k>=N || tType[y*N+x+k]!==T_LOT) ok=false;
+      if(ok) break; w--; }
+    while(h>1){ let ok=true;
+      for(let k=0;k<h;k++) for(let j=0;j<w;j++)
+        if(y+k>=N || tType[(y+k)*N+x+j]!==T_LOT) ok=false;
+      if(ok) break; h--; }
+
+    const density = vnoise(x/26, y/26, 3);              // dzielnice: centrum vs. peryferia
+    const area = w*h;
+    const seedB = h32(x,y,seed,5);
+    const rr = mulberry32(seedB);
+
+    if(rr() < 0.085){ // park / plac
+      for(let k=0;k<h;k++) for(let j=0;j<w;j++){
+        const i2=(y+k)*N+x+j;
+        if(rr()<0.45){ tType[i2]=T_TREE; tH[i2]=0.55+rr()*0.5;
+          tCol[i2]=5; tStyle[i2]=8; tSeed[i2]=h32(x+j,y+k,7,1); }
+        else tType[i2]=T_PLAZA;
+      }
+      continue;
+    }
+
+    let hh = 1.4 + Math.pow(density,2.4)*25*(0.35+0.65*rr());
+    hh *= (0.75 + 0.25*Math.min(area,6)/6);
+    if(rr()<0.05) hh *= 1.9;                            // pojedyncze wieżowce
+    hh = Math.min(hh, 27);
+
+    const pick = ()=>{
+      const r = rr();
+      const dist = ((h32(x>>3,y>>3,seed,9))>>>0)%1000/1000;
+      const primary = dist<0.34?0 : dist<0.62?1 : dist<0.80?2 : 3;
+      const second  = dist<0.34?2 : dist<0.62?4 : dist<0.80?9 : 6;
+      return r<0.6?primary : r<0.88?second : (r<0.95?7:8);
+    };
+    const col = pick(), st = (rr()*STYLES.length)|0;
+    const hasBand = rr()<0.34, bandH = 0.12*hh + rr()*0.55*hh;
+    const bandC = [6,5,0,4,9][(rr()*5)|0];
+    const mast = (hh>13 && rr()<0.45) ? 1+rr()*3 : 0;
+
+    for(let k=0;k<h;k++) for(let j=0;j<w;j++){
+      const i2=(y+k)*N+x+j;
+      tType[i2]=T_BLD; tH[i2]=hh; tCol[i2]=col; tStyle[i2]=st;
+      tSeed[i2]=seedB; tBand[i2]=hasBand?bandH:0; tBandC[i2]=bandC;
+      tMast[i2]=(j===((w/2)|0)&&k===((h/2)|0))?mast:0;
+    }
+  }
+  spawnTraffic(seed);
+}
+
+/* ---------------- ruch uliczny ---------------- */
+const CARS=[], PEDS=[];
+function spawnTraffic(seed){
+  CARS.length=0; PEDS.length=0;
+  const R=mulberry32(seed^0x9e37);
+  for(let i=0;i<110;i++){
+    const vert = R()<0.5;
+    const road = ((R()*(N/BX))|0)*BX;
+    const back = R()<0.5;
+    const lane = back?0.68:0.32;
+    const spd = (1.6 + R()*4.2) * (back?-1:1);
+    const col = [0,3,1,8,6,4,9][(R()*7)|0];
+    CARS.push({v:vert, x: vert? road+lane : R()*N,
+                       y: vert? R()*N : road+lane,
+               s:spd, c:col});
+  }
+  for(let i=0;i<130;i++){
+    const vert = R()<0.5;
+    const road = ((R()*(N/BX))|0)*BX;
+    const side = R()<0.5 ? -0.45 : 1.45;
+    const spd = (0.5+R()*0.6)*(R()<0.5?-1:1);
+    PEDS.push({v:vert, x: vert? road+side : R()*N,
+                       y: vert? R()*N : road+side,
+               s:spd, c:[8,0,6,5,4][(R()*5)|0], ph:R()*6.28});
+  }
+}
+function stepTraffic(dt){
+  for(let i=0;i<CARS.length;i++){ const c=CARS[i];
+    if(c.v){ c.y=(c.y+c.s*dt+N)%N; } else { c.x=(c.x+c.s*dt+N)%N; } }
+  for(let i=0;i<PEDS.length;i++){ const p=PEDS[i];
+    if(p.v){ p.y=(p.y+p.s*dt+N)%N; } else { p.x=(p.x+p.s*dt+N)%N; } }
+}
+
+/* ---------------- kamera ---------------- */
+let px=4.5, py=4.5, yaw=0.6, pitch=0, bob=0, bobT=0;
+function safeSpawn(){
+  // start na szerokiej alei, patrząc w głąb kanionu ulicy
+  for(let k=0;k<N;k++){
+    const x=32.9, y=8+k;
+    if(tType[idx(Math.floor(x),Math.floor(y))]===T_ROAD){
+      px=x; py=y+0.5; yaw=Math.PI/2; pitch=0.06; return;
+    }
+  }
+  px=4.5; py=4.5;
+}
+
+/* ---------------- bufory ekranu ---------------- */
+let W=0,H=0,cols=0,rows=0,cellW=10,cellH=16,fontPx=16,dpr=1;
+let charBuf=null, colBuf=null, zbuf=null;
+let Kh=0, Kv=0, horizon=0;
+const cssCache = new Array(32768);
+function pack15(r,g,b){
+  r=r<0?0:r>255?255:r; g=g<0?0:g>255?255:g; b=b<0?0:b>255?255:b;
+  return ((r>>3)<<10)|((g>>3)<<5)|(b>>3);
+}
+function cssOf(p){
+  let s=cssCache[p];
+  if(s===undefined){
+    const r=((p>>10)&31)<<3, g=((p>>5)&31)<<3, b=(p&31)<<3;
+    s='rgb('+(r|4)+','+(g|4)+','+(b|4)+')';
+    cssCache[p]=s;
+  }
+  return s;
+}
+
+const bloomC = document.createElement('canvas');
+const bctx = bloomC.getContext('2d');
+const FONT_STACK = '"DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,"Courier New",monospace';
+
+function resize(){
+  dpr = Math.min(window.devicePixelRatio||1, 2);
+  W = Math.floor(canvas.clientWidth*dpr);
+  H = Math.floor(canvas.clientHeight*dpr);
+  canvas.width=W; canvas.height=H;
+  fontPx = Math.max(6, Math.round(W/CFG.targetCols/0.601));
+  // budzet komorek - na waskich/wysokich ekranach (telefon) inaczej sie udlawi
+  const BUDGET = 15000;
+  for(let guard=0; guard<40; guard++){
+    ctx.font = fontPx+'px '+FONT_STACK;
+    cellW = ctx.measureText('M').width || fontPx*0.6;
+    cellH = Math.max(4, Math.round(fontPx*1.04));
+    cols = Math.max(20, Math.floor(W/cellW));
+    rows = Math.max(12, Math.floor(H/cellH));
+    if(cols*rows <= BUDGET || fontPx > 42) break;
+    fontPx++;
+  }
+  ctx.font = fontPx+'px '+FONT_STACK;
+  ctx.textBaseline = 'top';
+  charBuf = new Uint16Array(cols*rows);
+  colBuf  = new Uint16Array(cols*rows);
+  zbuf    = new Float32Array(cols);
+  Kh = (cols/2)/Math.tan(CFG.fov/2);
+  Kv = Kh*(cellW/cellH);
+  bloomC.width = Math.max(1,W>>2); bloomC.height = Math.max(1,H>>2);
+  bctx.imageSmoothingEnabled = true;
+}
+window.addEventListener('resize', resize);
+
+/* ---------------- sterowanie ---------------- */
+const keys = Object.create(null);
+addEventListener('keydown', e=>{
+  keys[e.code]=true;
+  if(e.code==='KeyB'){ CFG.bloom=!CFG.bloom; }
+  if(e.code==='KeyR'){ buildCity((Math.random()*1e9)|0); safeSpawn(); }
+  if(e.code==='BracketLeft'){ CFG.targetCols=Math.max(60,CFG.targetCols-18); resize(); }
+  if(e.code==='BracketRight'){ CFG.targetCols=Math.min(260,CFG.targetCols+18); resize(); }
+  if(e.code==='KeyF'){ if(!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+                       else document.exitFullscreen?.(); }
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e=>{ keys[e.code]=false; });
+
+let locked=false;
+canvas.addEventListener('click', ()=>{ if(!('ontouchstart' in window)) canvas.requestPointerLock?.(); });
+document.addEventListener('pointerlockchange', ()=>{ locked = document.pointerLockElement===canvas; });
+addEventListener('mousemove', e=>{
+  if(!locked) return;
+  yaw += e.movementX*0.0022;
+  pitch = Math.max(-0.55, Math.min(0.55, pitch - e.movementY*0.0016));
+});
+
+const touch = {move:{id:-1,ox:0,oy:0,dx:0,dy:0}, look:{id:-1,lx:0,ly:0}};
+canvas.addEventListener('pointerdown', e=>{
+  if(e.pointerType!=='touch') return;
+  canvas.setPointerCapture(e.pointerId);
+  if(e.clientX < canvas.clientWidth/2 && touch.move.id<0){
+    touch.move.id=e.pointerId; touch.move.ox=e.clientX; touch.move.oy=e.clientY;
+    touch.move.dx=0; touch.move.dy=0;
+  } else if(touch.look.id<0){
+    touch.look.id=e.pointerId; touch.look.lx=e.clientX; touch.look.ly=e.clientY;
+  }
+});
+canvas.addEventListener('pointermove', e=>{
+  if(e.pointerId===touch.move.id){
+    touch.move.dx=(e.clientX-touch.move.ox)/55;
+    touch.move.dy=(e.clientY-touch.move.oy)/55;
+  } else if(e.pointerId===touch.look.id){
+    yaw += (e.clientX-touch.look.lx)*0.006;
+    pitch = Math.max(-0.55, Math.min(0.55, pitch-(e.clientY-touch.look.ly)*0.004));
+    touch.look.lx=e.clientX; touch.look.ly=e.clientY;
+  }
+});
+function endTouch(e){
+  if(e.pointerId===touch.move.id){ touch.move.id=-1; touch.move.dx=0; touch.move.dy=0; }
+  if(e.pointerId===touch.look.id){ touch.look.id=-1; }
+}
+canvas.addEventListener('pointerup', endTouch);
+canvas.addEventListener('pointercancel', endTouch);
+
+/* ---------------- kolizje ---------------- */
+function blocked(x,y){
+  const t = tType[idx(Math.floor(x),Math.floor(y))];
+  return t===T_BLD || t===T_TREE;
+}
+function move(dt){
+  let fwd=0, str=0;
+  if(keys['KeyW']||keys['ArrowUp']) fwd+=1;
+  if(keys['KeyS']||keys['ArrowDown']) fwd-=1;
+  if(keys['KeyD']) str+=1;
+  if(keys['KeyA']) str-=1;
+  if(keys['ArrowLeft']) yaw-=1.6*dt;
+  if(keys['ArrowRight']) yaw+=1.6*dt;
+  if(touch.move.id>=0){
+    fwd += Math.max(-1,Math.min(1,-touch.move.dy));
+    str += Math.max(-1,Math.min(1, touch.move.dx));
+  }
+  const mag = Math.hypot(fwd,str);
+  if(mag>1){ fwd/=mag; str/=mag; }
+  const sp = CFG.speed*(keys['ShiftLeft']||keys['ShiftRight']?CFG.runMul:1);
+  const dx = (Math.cos(yaw)*fwd - Math.sin(yaw)*str)*sp*dt;
+  const dy = (Math.sin(yaw)*fwd + Math.cos(yaw)*str)*sp*dt;
+  const r=0.18;
+  if(!blocked(px+dx+Math.sign(dx)*r, py)) px+=dx;
+  if(!blocked(px, py+dy+Math.sign(dy)*r)) py+=dy;
+  const moving = mag>0.05;
+  bobT += dt*(moving?sp*2.4:0);
+  bob = moving ? Math.sin(bobT)*0.55 : bob*0.9;
+}
+
+/* ---------------- render: powierzchnie ---------------- */
+let outCh=0, outCol=0;
+
+function shade(pal, f){
+  return pack15(pal[0]*f, pal[1]*f, pal[2]*f);
+}
+
+function wallSample(i, side, wx, wy, d, fog){
+  const seed = tSeed[i], st = STYLES[tStyle[i]], pal = PAL[tCol[i]];
+  const face = side===1 ? 0.70 : 1.0;
+  const band = tBand[i];
+
+  // pas neonu / szyld
+  if(band>0 && Math.abs(wy-band)<0.19){
+    const bp = PAL[tBandC[i]];
+    const on = rnd01(seed, (wx*6)|0, (wy*6)|0, 4) > 0.22;
+    outCh = on ? 36+((h32(seed,(wx*6)|0,2,9)>>>0)%3)*11 : 46; // $ / + / . itp.
+    outCol = shade(bp, (on?1.25:0.4)*fog*face);
+    return;
+  }
+  // krawędzie budynku — pionowe świetlówki
+  if(wx<0.028 || wx>0.972){
+    outCh = 124; // |
+    outCol = shade(pal, Math.min(1.5, 1.25)*fog);
+    return;
+  }
+  const floorV = wy/0.72;
+  const iv = Math.floor(floorV);
+  const fv = floorV - iv;
+  // strop / gzyms
+  if(fv > 0.78){
+    outCh = 45; // -
+    outCol = shade(pal, 0.30*fog*face);
+    return;
+  }
+  const iu = Math.floor(wx*3) + (side===1?11:0);
+  const r = rnd01(seed, iu, iv, 1);
+  const flick = rnd01(seed, iu, iv, 2);
+  let lit = r > 0.42;
+  if(lit && flick>0.985) lit = ((now*0.004 + flick*30)|0)%2===0; // migające okna
+  // drobny detal wewnatrz okna - zeby bliskie fasady nie byly plaskie
+  const su = Math.floor(wx*15), sv = Math.floor(wy*7.5);
+  const sub = rnd01(seed^0x5bd1, su, sv, 8);
+  if(lit){
+    const b = (0.62 + 0.34*rnd01(seed,iu,iv,3) + 0.28*sub)*fog*face;
+    outCh = sub>0.34 ? st.a : st.b;
+    outCol = shade(pal, b);
+  } else {
+    if(sub < 0.40){ outCh=0; outCol=0; }
+    else { outCh = sub<0.72?46:58; outCol = shade(pal, (0.14+0.16*sub)*fog*face); }
+  }
+}
+
+function groundSample(fx, fy, d, fog){
+  const gx=Math.floor(fx), gy=Math.floor(fy);
+  const t = tType[idx(gx,gy)];
+  const u = fx-gx, v = fy-gy;
+  if(t===T_ROAD){
+    const vert = isRoadCol(gx);
+    const along = vert ? fy : fx;
+    const across = vert ? u : v;
+    if(Math.abs(across-0.5)<0.055 && (Math.floor(along*1.4)&1)===0){
+      outCh = vert?124:45;
+      outCol = shade(PAL[4], 0.85*fog);
+      return;
+    }
+    const r = rnd01(gx,gy,(along*3)|0,12);
+    outCh = fog>0.5 ? (r<0.5?61:45) : (r<0.5?45:46); // = - .
+    outCol = shade(GREY, (0.30+0.25*r)*fog);
+    return;
+  }
+  if(t===T_WALK){
+    const r = rnd01((fx*3)|0,(fy*3)|0,0,13);
+    if(r>0.93){ // kałuża z odbiciem neonu
+      outCh = 126; outCol = shade(PAL[(h32(gx,gy,1,1)>>>0)%7], 0.55*fog); return;
+    }
+    outCh = fog>0.45 ? 58 : 46; // : .
+    outCol = shade(GREY, (0.42+0.2*r)*fog);
+    return;
+  }
+  if(t===T_PLAZA || t===T_TREE){
+    outCh = 34; // "
+    outCol = shade(PAL[5], 0.28*fog);
+    return;
+  }
+  outCh = 46; outCol = shade(GREY, 0.25*fog);
+}
+
+/* ---------------- render: klatka ---------------- */
+const MAXHITS=48;
+const hD=new Float64Array(MAXHITS), hHt=new Float64Array(MAXHITS),
+      hI=new Int32Array(MAXHITS), hS=new Uint8Array(MAXHITS),
+      hWX=new Float64Array(MAXHITS), hTop=new Float64Array(MAXHITS),
+      hBot=new Float64Array(MAXHITS);
+
+let now=0;
+
+function render(){
+  charBuf.fill(0);
+  const dirX=Math.cos(yaw), dirY=Math.sin(yaw);
+  const planeLen=Math.tan(CFG.fov/2);
+  const planeX=-dirY*planeLen, planeY=dirX*planeLen;
+  horizon = rows*0.5 + Math.tan(pitch)*Kv + bob;
+  const eye = CFG.eye;
+
+  for(let col=0; col<cols; col++){
+    const camX = 2*col/cols - 1;
+    let rdx = dirX + planeX*camX, rdy = dirY + planeY*camX;
+    if(Math.abs(rdx)<1e-9) rdx=1e-9;
+    if(Math.abs(rdy)<1e-9) rdy=1e-9;
+
+    let mapX=Math.floor(px), mapY=Math.floor(py);
+    const ddx=Math.abs(1/rdx), ddy=Math.abs(1/rdy);
+    let stepX, stepY, sdx, sdy;
+    if(rdx<0){ stepX=-1; sdx=(px-mapX)*ddx; } else { stepX=1; sdx=(mapX+1-px)*ddx; }
+    if(rdy<0){ stepY=-1; sdy=(py-mapY)*ddy; } else { stepY=1; sdy=(mapY+1-py)*ddy; }
+
+    let n=0, minTop=rows+1, side=0, dist=0;
+    for(let s=0; s<200 && n<MAXHITS; s++){
+      if(sdx<sdy){ sdx+=ddx; mapX+=stepX; side=0; dist=sdx-ddx; }
+      else       { sdy+=ddy; mapY+=stepY; side=1; dist=sdy-ddy; }
+      if(dist>CFG.maxDepth) break;
+      if(dist<0.02) continue;
+      const i=idx(mapX,mapY);
+      const bh=tH[i];
+      if(bh<=0) continue;
+      const top = horizon - (bh-eye)*Kv/dist;
+      if(top>=minTop) continue;                 // całkowicie zasłonięty
+      hD[n]=dist; hHt[n]=bh; hI[n]=i; hS[n]=side;
+      hWX[n]= side===0 ? (py+dist*rdy) : (px+dist*rdx);
+      hWX[n]-= Math.floor(hWX[n]);
+      hTop[n]=top; hBot[n]=horizon + eye*Kv/dist;
+      minTop=top; n++;
+      if(top<=0) break;
+    }
+    zbuf[col] = n>0 ? hD[0] : CFG.maxDepth;
+
+    // --- podłoże (od dołu ekranu w górę, do najbliższej ściany) ---
+    const stopRow = n>0 ? Math.max(horizon+0.5, hBot[0]) : horizon+0.5;
+    for(let row=rows-1; row>stopRow; row--){
+      const dy = (row+0.5) - horizon;
+      if(dy<=0.001) break;
+      const d = eye*Kv/dy;
+      if(d>CFG.maxDepth) break;
+      const fog = Math.exp(-d/CFG.fogDist);
+      groundSample(px+rdx*d, py+rdy*d, d, fog);
+      if(outCh){ const o=row*cols+col; charBuf[o]=outCh; colBuf[o]=outCol; }
+    }
+
+    // --- budynki: od najdalszego do najbliższego ---
+    for(let k=n-1;k>=0;k--){
+      const d=hD[k], i=hI[k], fog=Math.exp(-d/CFG.fogDist);
+      let r0=Math.max(0, Math.ceil(hTop[k])), r1=Math.min(rows-1, Math.floor(hBot[k]));
+      for(let row=r0; row<=r1; row++){
+        const wy = eye + (horizon-(row+0.5))*d/Kv;
+        if(wy<0) continue;
+        wallSample(i, hS[k], hWX[k], wy, d, fog);
+        if(outCh){ const o=row*cols+col; charBuf[o]=outCh; colBuf[o]=outCol; }
+      }
+      // maszt / antena
+      const m=tMast[i];
+      if(m>0 && Math.abs(hWX[k]-0.5)<0.07){
+        const mt = Math.max(0, Math.ceil(horizon-(hHt[k]+m-eye)*Kv/d));
+        const mb = Math.min(rows-1, Math.floor(hTop[k]));
+        const cc = shade(PAL[tCol[i]], 0.8*fog);
+        for(let row=mt; row<=mb; row++){ const o=row*cols+col; charBuf[o]=124; colBuf[o]=cc; }
+        if(mt>=0 && mt<rows && ((now*0.002)|0)%2===0){
+          const o=mt*cols+col; charBuf[o]=42; colBuf[o]=shade(PAL[3],1.3*fog);
+        }
+      }
+      // gwiazdy nad linią dachu tylko dla najdalszego elementu
+      if(k===n-1){ stars(col, Math.max(0,Math.ceil(hTop[k])-1), rdx, rdy); }
+    }
+    if(n===0) stars(col, Math.min(rows-1, Math.floor(horizon)), rdx, rdy);
+  }
+
+  drawSprites(dirX,dirY,planeX,planeY);
+  blit();
+}
+
+function stars(col, upto, rdx, rdy){
+  const aq = (Math.atan2(rdy,rdx)*180)|0;
+  const lim = Math.min(upto, rows-1);
+  for(let row=0; row<lim; row++){
+    const o=row*cols+col;
+    if(charBuf[o]) continue;
+    const r = rnd01(aq,row,17,3);
+    if(r>0.9975){ charBuf[o]=46; colBuf[o]=pack15(70,90,110); }
+  }
+}
+
+/* ---------------- sprite'y ---------------- */
+const sprites=[];
+function wrapD(v){ v%=N; if(v>N/2) v-=N; else if(v<-N/2) v+=N; return v; }
+
+function drawSprites(dirX,dirY,planeX,planeY){
+  sprites.length=0;
+  const invDet = 1/(planeX*dirY - dirX*planeY);
+  for(let i=0;i<CARS.length;i++){
+    const c=CARS[i], rx=wrapD(c.x-px), ry=wrapD(c.y-py);
+    if(Math.abs(rx)>CFG.maxDepth||Math.abs(ry)>CFG.maxDepth) continue;
+    const ty = invDet*(-planeY*rx + planeX*ry);
+    if(ty<0.4||ty>CFG.maxDepth) continue;
+    const tx = invDet*(dirY*rx - dirX*ry);
+    sprites.push({ty,tx,kind:0,c:c.c,front:c.s>0,v:c.v});
+  }
+  for(let i=0;i<PEDS.length;i++){
+    const p=PEDS[i], rx=wrapD(p.x-px), ry=wrapD(p.y-py);
+    if(Math.abs(rx)>34||Math.abs(ry)>34) continue;
+    const ty = invDet*(-planeY*rx + planeX*ry);
+    if(ty<0.4||ty>34) continue;
+    const tx = invDet*(dirY*rx - dirX*ry);
+    sprites.push({ty,tx,kind:1,c:p.c,ph:p.ph});
+  }
+  sprites.sort((a,b)=>b.ty-a.ty);
+
+  for(let s=0;s<sprites.length;s++){
+    const sp=sprites[s], d=sp.ty;
+    const fog=Math.exp(-d/CFG.fogDist);
+    const wWorld = sp.kind===0 ? 0.62 : 0.20;
+    const hWorld = sp.kind===0 ? 0.40 : 0.46;
+    const cx = (cols/2)*(1 + sp.tx/d);
+    const wCols = Math.max(1, wWorld*Kh/d);
+    const hRows = Math.max(1, hWorld*Kv/d);
+    const bot = horizon + CFG.eye*Kv/d;
+    const top = bot - hRows;
+    const c0=Math.max(0,Math.floor(cx-wCols/2)), c1=Math.min(cols-1,Math.ceil(cx+wCols/2));
+    const r0=Math.max(0,Math.floor(top)), r1=Math.min(rows-1,Math.ceil(bot)-1);
+    const pal=PAL[sp.c];
+    for(let col=c0; col<=c1; col++){
+      if(d>=zbuf[col]) continue;
+      const u=(col+0.5-(cx-wCols/2))/wCols;
+      if(u<0||u>1) continue;
+      for(let row=r0; row<=r1; row++){
+        const v=(row+0.5-top)/hRows;
+        if(v<0||v>1) continue;
+        let ch=0, br=1;
+        if(sp.kind===0){
+          if(v>0.74){ ch = (u<0.24||u>0.76)?111:95; br=0.55; }      // koła / cień
+          else if(v<0.34){ ch=61; br=0.9; }                          // kabina
+          else { ch=35; br=1.0; }                                    // nadwozie
+          if(v>0.40 && (u<0.17||u>0.83)){ ch=42; br=1.7; }           // światła
+        } else {
+          const step = Math.sin(now*0.006 + sp.ph)>0;
+          if(v<0.30) ch=111;                                         // głowa
+          else if(v<0.74) ch=65;                                     // tułów
+          else ch = step?47:92;                                      // nogi
+          br=1.0;
+        }
+        if(!ch) continue;
+        const o=row*cols+col;
+        charBuf[o]=ch; colBuf[o]=shade(pal, Math.min(1.6, br*(0.5+fog)));
+      }
+    }
+  }
+}
+
+/* ---------------- blit ---------------- */
+function blit(){
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+  ctx.font = fontPx+'px '+FONT_STACK;
+  ctx.textBaseline='top';
+  for(let r=0;r<rows;r++){
+    const base=r*cols, y=r*cellH;
+    let c=0;
+    while(c<cols){
+      const ch=charBuf[base+c];
+      if(!ch){ c++; continue; }
+      const cl=colBuf[base+c];
+      let str=String.fromCharCode(ch), c2=c+1;
+      while(c2<cols){
+        const ch2=charBuf[base+c2];
+        if(!ch2 || colBuf[base+c2]!==cl) break;
+        str+=String.fromCharCode(ch2); c2++;
+      }
+      ctx.fillStyle=cssOf(cl);
+      ctx.fillText(str, c*cellW, y);
+      c=c2;
+    }
+  }
+  if(CFG.bloom){
+    bctx.clearRect(0,0,bloomC.width,bloomC.height);
+    bctx.drawImage(canvas,0,0,bloomC.width,bloomC.height);
+    ctx.save();
+    ctx.globalCompositeOperation='lighter';
+    ctx.globalAlpha=0.42;
+    ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(bloomC,0,0,W,H);
+    ctx.restore();
+  }
+}
+
+/* ---------------- pętla ---------------- */
+let last=performance.now(), fps=60, frame=0;
+function loop(t){
+  now=t;
+  let dt=(t-last)/1000; last=t;
+  if(dt>0.06) dt=0.06;
+  fps += ((1/Math.max(dt,1e-4))-fps)*0.08;
+  move(dt);
+  stepTraffic(dt);
+  render();
+  if((frame++ & 15)===0){
+    hud.textContent =
+      'FPS '+fps.toFixed(0)+'  ·  '+cols+'×'+rows+' znaków  ·  '+
+      (cols*rows)+' komórek/klatkę\n'+
+      'POS '+px.toFixed(1)+', '+py.toFixed(1)+'  ·  AZYMUT '+
+      ((yaw*180/Math.PI)%360).toFixed(0)+'°  ·  BLOOM '+(CFG.bloom?'ON':'OFF');
+    hud.style.whiteSpace='pre';
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ---------------- start ---------------- */
+resize();
+buildCity(1337);
+safeSpawn();
+setTimeout(()=>document.getElementById('splash').classList.add('gone'), 100);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

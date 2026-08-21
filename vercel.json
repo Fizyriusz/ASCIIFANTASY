@@ -1,0 +1,6 @@
+{
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm --filter @rpg/game build",
+  "outputDirectory": "apps/game/dist",
+  "framework": null
+}
