@@ -8,8 +8,4 @@ export default defineConfig({
       '@rpg/world': fileURLToPath(new URL('../../packages/world/src/index.ts', import.meta.url)),
     },
   },
-  // Vercel szuka artefaktu w korzeniu repo (Root Directory = korzeń), więc build
-  // celuje tam zamiast w apps/game/dist. emptyOutDir jest wymagane, bo katalog
-  // leży poza rootem projektu vite i bez tego vite odmówi jego czyszczenia.
-  build: { outDir: '../../dist', emptyOutDir: true },
 });
