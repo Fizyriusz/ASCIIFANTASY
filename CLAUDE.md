@@ -43,6 +43,11 @@ Punkt wyjścia i dowód, że podejście działa: `docs/prototyp/ascii-city.html`
 
 Scena referencyjna: `seed=1337`, kamera `(33.0, 32.5)`, azymut 90°, 150×48 znaków.
 
+Limit spanów dotyczy **terenu otwartego** — tam decyduje o kosztach pamięci i generacji.
+Zabudowa ma prawo być gęstsza: miasto testowe z M0 daje 1.339 spanu na komórkę
+(1389 komórek wielospanowych na 4096) i to jest w porządku. Realny pomiar tego
+budżetu ma sens dopiero przy generacji proceduralnej w M1.
+
 ---
 
 ## Układ repo i kierunek zależności

@@ -139,6 +139,27 @@ z jednego kodu; brak osobnego floor-castingu; naturalne zasłanianie.
 **Wnętrza**: gracz wewnątrz = zwykły przypadek — nad nim jest span sufitu, więc kolumna
 kończy się na nim. Portale (drzwi) to flaga na spanie, nie osobny system.
 
+**Uwaga do szkicu powyżej**: implementacja z M0 trzyma **dwa** fronty wypełniania —
+`loRow` rosnący w górę i `hiRow` schodzący w dół — bo pojedynczy `minRow` gubi
+powierzchnie nad okiem. Szczegóły i poprawiony podział na czapkę i ścianę:
+`docs/zadania/M0-rdzen-renderera.md` §3 oraz komentarz na górze `packages/core/src/raymarch.ts`.
+
+**Znane ograniczenie: otwór w środku kolumny.** Dwa fronty opisują stan kolumny
+dwiema liczbami, więc kolumna jest zawsze *spójna* — zamalowana od dołu i od góry,
+z jedną dziurą pośrodku. To wystarcza dla terenu, budynków, mostów i wnętrz, ale
+nie wyraża geometrii widocznej **przez otwór w środku widoku**: okna, arkady,
+bramy przejazdowej, dziury w murze. Przez taki otwór widać dalszą geometrię
+*między* dwoma zamalowanymi obszarami, czego para `(loRow, hiRow)` nie potrafi
+zapisać.
+
+Planowane rozwiązanie, **do decyzji w M2**: szybka ścieżka dwóch frontów zostaje
+domyślną, a kolumna, która trafi na span z flagą `Door` lub `Transparent`,
+przełącza się na maskę pokrycia wierszy (bitmapa `rows` bitów albo lista
+przedziałów). Koszt trzeba **zmierzyć**, nie założyć: interesuje nas czas kolumny
+z maską względem kolumny szybkiej ścieżki i udział takich kolumn w typowej scenie
+miejskiej. Jeśli maska okaże się droższa, niż wynosi zysk wizualny, alternatywą
+jest ograniczenie otworów do osobnego przebiegu tylko dla spanów przezroczystych.
+
 ### 3.2 Materiały zamiast tekstur
 
 ```ts

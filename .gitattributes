@@ -1,0 +1,7 @@
+# Domyślnie normalizuj końce linii w repozytorium do LF.
+* text=auto
+
+# Pliki złote to porównanie bajt w bajt: assertSnapshot zestawia stringi, więc
+# CRLF wstawiony przy checkoutcie na Windowsie wywala snapshot i pokazuje diff,
+# w którym obie linie wyglądają identycznie. Wymuszamy LF w kopii roboczej.
+tools/harness/golden/*.txt text eol=lf

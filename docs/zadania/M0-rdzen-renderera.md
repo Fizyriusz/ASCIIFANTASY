@@ -93,9 +93,42 @@ Algorytm w komentarzu na górze pliku. Punkty krytyczne:
   Wiersz dla wysokości `z` w odległości `d`: `row = horizon - (z - eyeZ) * Kv / d`.
   Horyzont: `rows/2 + tan(pitch) * Kv`.
 - **Odległość prostopadła**, nie euklidesowa — inaczej dostaniesz rybie oko.
-- **Odrzucanie zasłoniętych:** span z `rowTop >= minRow` jest niewidoczny w całości.
-  To poprawne, bo bliższa geometria ma zawsze niższy dolny wiersz.
-- **Wczesne wyjście:** `minRow <= 0` kończy kolumnę.
+- **Dwa fronty wypełniania, nie jeden.** Pierwotny szkic tego zlecenia mówił
+  o pojedynczym `minRow` rosnącym w górę. To renderuje poprawnie wszystko, na co
+  patrzymy z góry, ale **gubi każdą powierzchnię nad okiem** — spód mostu i sufit
+  wnętrza, czyli dokładnie te dwa przypadki, dla których w ogóle wprowadzamy spany.
+  Poprawna wersja trzyma dwa fronty:
+
+  ```
+  loRow = rows      // najwyższy wiersz zamalowany od dołu
+  hiRow = -1        // najniższy wiersz zamalowany od góry
+  dla każdej komórki na trasie DDA:
+    spany z bottom < eyeZ, od góry:      → front dolny, wypełnia w górę do loRow-1
+    spany z bottom >= eyeZ, od dołu:     → front górny, wypełnia w dół do hiRow+1
+    jeśli hiRow + 1 >= loRow: przerwij   // fronty się spotkały, kolumna pełna
+  ```
+
+  Fronty są swoimi lustrzanymi odbiciami i spotykają się w okolicach horyzontu.
+  Warunkiem końca kolumny jest ich zetknięcie, a nie `minRow <= 0`.
+- **Odrzucanie zasłoniętych:** span, którego krawędź wypada na `loRow` lub niżej
+  (odpowiednio: na `hiRow` lub wyżej), jest niewidoczny w całości. To poprawne,
+  bo bliższa geometria ma zawsze niższy dolny wiersz.
+- **Podział na czapkę i ścianę wynika z poprzedniej powierzchni w kolumnie,
+  nie z dolnej krawędzi spanu.** Drugi błąd pierwotnego szkicu: reguła
+  „czapka: `rowTop .. min(rowBot, minRow-1)`" maluje fasadę wieżowca materiałem
+  dachu, bo dla wysokiego spanu `rowBot` wypada poniżej dotychczasowego frontu
+  i cały pasek idzie jako czapka. Poprawnie:
+
+  ```
+  capZ  = min(poprzednia_powierzchnia, span.top)     // niższa z dwóch wygrywa
+  ściana: od rzutu span.top do rzutu max(capZ, span.bottom)   → mat
+  czapka: reszta paska do loRow-1, floor-cast na płaszczyźnie capZ → capMat
+  ```
+
+  Dla płaskiego terenu obie wysokości są równe, ściana wychodzi pusta i zostaje
+  sama czapka. Dla budynku ściana to fasada, a czapka to pasek ulicy u jej stóp.
+  Ograniczenie ściany także **własnym spodem spanu** jest konieczne: bez niego
+  przęsło mostu oglądane z dołu zamalowuje całe niebo nad sobą.
 - **Czapka spanu** (górna powierzchnia) i **ściana boczna** to dwa różne materiały
   i dwa różne sposoby próbkowania: czapka po pozycji XY, ściana po `wallU` i wysokości.
 - **Mgła:** `exp(-d / fogDist)` mnoży luminancję. `fogDist` w `RenderContext`.
@@ -162,7 +195,7 @@ proponujesz jako następne, i czekaj na kolejne zlecenie.
    Licz z dokładnej pozycji trafienia.
 2. **Zapominanie o `perpDist` przy czapkach spanów** — czapka jest powierzchnią poziomą,
    więc jej wiersze wynikają z wysokości i odległości, nie z interpolacji między spanami.
-3. **`minRow` aktualizowane przed narysowaniem** → dziura o jeden wiersz na styku brył.
+3. **Front aktualizowany przed narysowaniem** → dziura o jeden wiersz na styku brył.
 4. **Zmienne pętli deklarowane w środku bloku** w hot pathcie → V8 czasem alokuje.
    Deklaracje na górze funkcji, `let`, typy liczbowe stałe.
 5. **Kolumna bez trafień** musi zostawić czyste tło, a nie poprzednią klatkę —

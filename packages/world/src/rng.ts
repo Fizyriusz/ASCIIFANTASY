@@ -2,22 +2,15 @@
  * Deterministyczne źródła losowości. W packages/world nie wolno użyć Math.random()
  * — cały świat musi być odtwarzalny z seeda, bo zapis gry to seed + delty.
  * Zasada jest sprawdzana testem (rng.test.ts).
+ *
+ * Sam `h32` mieszka w `@rpg/core/hash` — renderer też go potrzebuje do doboru
+ * glifu, a `core` leży niżej w łańcuchu zależności. Tutaj jest reeksportowany,
+ * żeby kod generacji świata miał jedno miejsce, z którego bierze losowość.
  */
 
-/** Hash 4 liczb całkowitych → uint32. Podstawa całej generacji. */
-export function h32(a: number, b: number, c: number, d: number): number {
-  let x =
-    Math.imul(a | 0, 0x27d4eb2d) ^
-    Math.imul(b | 0, 0x165667b1) ^
-    Math.imul(c | 0, 0x9e3779b1) ^
-    Math.imul(d | 0, 0x85ebca6b);
-  x ^= x >>> 15;
-  x = Math.imul(x, 0x2545f491);
-  x ^= x >>> 13;
-  x = Math.imul(x, 0x27d4eb2d);
-  x ^= x >>> 16;
-  return x >>> 0;
-}
+import { h32 } from '@rpg/core';
+
+export { h32 };
 
 /** Hash → 0..1. Bezstanowy: ta sama pozycja zawsze daje tę samą wartość. */
 export function rnd01(a: number, b: number, c: number, d: number): number {
