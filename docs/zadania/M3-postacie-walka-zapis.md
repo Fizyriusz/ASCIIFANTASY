@@ -24,8 +24,12 @@ apps/game/src/main.ts
 ```
 
 ### Nie dotykać
-`raymarch.ts` poza dodaniem odczytu `ColumnHits` jako z-bufora — struktura jest
-wypełniana od M0 właśnie w tym celu i nie wymaga zmian w marszu.
+`terrain.ts`, `hydro.ts`, `biome.ts`, `dungeon.ts`, `blit.ts`, `color.ts`, `metrics.ts`,
+`hash.ts`.
+
+`raymarch.ts` i `screen.ts` wolno zmienić **wyłącznie** po to, żeby powstał bufor głębi
+(patrz §1a). Każda inna zmiana w marszu jest poza zakresem — jeśli okaże się potrzebna,
+zatrzymaj się i opisz to w podsumowaniu.
 
 ---
 
@@ -49,10 +53,38 @@ interface SpriteFrames {
   danych w paczce contentu, a bez tego NPC czyta się jak naklejka obracająca się razem
   z graczem. To jest najtańsza rzecz w całym M3, która daje wrażenie bryły
 - skalowanie próbkowaniem najbliższego sąsiada
-- **test głębi z `ColumnHits`** — sprite za ścianą ma zniknąć, sprite w drzwiach ma być
-  widoczny (i to jest test, że maska pokrycia z M2 współpracuje ze sprite'ami)
+- **test głębi** przeciwko buforowi z §1a — sprite za ścianą ma zniknąć, sprite
+  w drzwiach ma być widoczny (i to jest test, że maska pokrycia z M2 współpracuje
+  ze sprite'ami)
 - oświetlenie sprite'a bierze luminancję z komórki, na której stoi — potwór w ciemności
   jest niewidoczny, i to jest zamierzone
+
+### 1a. Bufor głębi
+
+`ColumnHits` **nie nadaje się** na z-bufor sprite'ów, wbrew temu, co mogłoby wynikać
+z jego nazwy: `renderWorld` używa jednego bufora dla wszystkich kolumn i zeruje
+`count` na wejściu do każdej, więc po klatce zostają trafienia wyłącznie ostatniej
+kolumny. Struktura służy diagnostyce i przyszłym zastosowaniom per kolumna, nie
+całej klatce.
+
+Skalarny `zbuf[cols]` — jedna odległość na kolumnę, jak w prototypie — też nie
+wystarczy. Po M2 kolumna może mieć **otwór**: wiersze nad drzwiami, w ich świetle
+i pod nimi mają trzy różne głębokości. Jedna liczba na kolumnę wycięłaby sprite'a
+stojącego w przejściu albo pokazała go przez ścianę.
+
+Dlatego bufor głębi ma rozmiar **`cols * rows`**:
+
+```ts
+depth: Float32Array;   // prealokowany razem z buforem znaków, przy Screen.resize
+```
+
+Zapisywany w tym samym miejscu, w którym renderer maluje znak — czyli jedno
+przypisanie na komórkę, bez osobnego przebiegu. To jedyny powód, dla którego M3
+w ogóle dotyka `raymarch.ts` i `screen.ts`.
+
+Koszt: 4 bajty na komórkę, przy budżecie 15 000 komórek to 60 kB. Zapis w hot pathcie
+zmierz i zaraportuj — jeśli `renderWorld` urośnie o więcej niż 10%, wróć z liczbami,
+zanim zaczniesz optymalizować.
 
 ### 2. `packages/rules` — reguły, minimum
 

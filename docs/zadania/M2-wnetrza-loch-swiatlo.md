@@ -36,9 +36,10 @@ do terenu, nie odwrotnie.
 
 ### 1. Otwór w środku kolumny — drzwi i okna
 
-Obecny renderer trzyma dwa fronty wypełniania (`minRow` w dół, `hiRow` w górę) i kończy
-kolumnę, gdy się spotkają. To wystarcza dla sufitów i mostów, ale nie dla przejścia,
-przez które widać dalszą geometrię **w środku** obrazu.
+Obecny renderer trzyma dwa fronty wypełniania (`loRow` startuje na `rows` i idzie
+w górę, `hiRow` startuje na `-1` i idzie w dół) i kończy kolumnę, gdy się spotkają.
+To wystarcza dla sufitów i mostów, ale nie dla przejścia, przez które widać dalszą
+geometrię **w środku** obrazu.
 
 Rozwiązanie, zgodnie z zapisem w architekturze:
 

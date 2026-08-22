@@ -43,13 +43,14 @@ próbkowanie, nie osobny algorytm. Cache per chunk, tani do policzenia razem z c
 
 ### 2. Dwie warstwy marszu
 
-- **blisko** (do zasięgu z M1, np. 62 komórki): obecny marsz spanowy, pełny detal
+- **blisko** (do zasięgu z M1, obecnie 64 komórki = 128 m): obecny marsz spanowy, pełny detal
 - **daleko** (do ~200 komórek): marsz po siatce zgrubnej, wyłącznie sylwetka —
   wysokość, kolor materiału, rampa znaku sterowana samą odległością. Bez tekstury,
   bez okien, bez detalu
 
-Warstwa daleka startuje tam, gdzie bliska skończyła: przekazujesz jej `minRow` / `hiRow`,
-więc zasłanianie działa dalej bez dodatkowej logiki.
+Warstwa daleka startuje tam, gdzie bliska skończyła: przekazujesz jej `loRow` / `hiRow`
+(dolny front idzie od `rows` w górę, górny od `-1` w dół), więc zasłanianie działa dalej
+bez dodatkowej logiki.
 
 ### 3. Ukrycie granicy
 

@@ -43,11 +43,17 @@ Punkt wyjścia i dowód, że podejście działa: `docs/prototyp/ascii-city.html`
 
 Scena referencyjna: `seed=1337`, kamera `(33.0, 32.5)`, azymut 90°, 150×48 znaków.
 
+Limit spanów dotyczy **terenu otwartego** — tam decyduje o kosztach pamięci i generacji.
+Zabudowa ma prawo być gęstsza: miasto testowe z M0 daje 1.339 spanu na komórkę
+(1389 komórek wielospanowych na 4096) i to jest w porządku. Realny pomiar tego
+budżetu ma sens dopiero przy generacji proceduralnej w M1.
+
 **Próg przejścia na WebGL.** Canvas 2D wystarcza, dopóki run-length trzyma serie długie —
-przy 6 800 komórkach mamy 978 wywołań `fillText` i 0,75 ms na klatkę. Rozważamy atlas
-glifów na GPU dopiero, gdy p95 samego blitu przekroczy **6 ms** albo siatka **20 000
-komórek**. Wcześniej to optymalizacja bez problemu do rozwiązania, a kosztuje przepisanie
-warstwy rysującej i utratę headless testów snapshotowych w obecnej formie.
+scena referencyjna to siatka 7 200 komórek, z czego 6 741 zamalowanych, i wychodzi z tego
+978 wywołań `fillText` przy **0,24 ms** na sam blit (`renderWorld` to osobne 0,84 ms).
+Rozważamy atlas glifów na GPU dopiero, gdy p95 samego blitu przekroczy **6 ms** — czyli
+25× obecnej wartości. Wcześniej to optymalizacja bez problemu do rozwiązania, a kosztuje
+przepisanie warstwy rysującej i utratę headless testów snapshotowych w obecnej formie.
 
 ---
 

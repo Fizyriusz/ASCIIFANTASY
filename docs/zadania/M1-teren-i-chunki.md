@@ -149,13 +149,15 @@ class ChunkStore implements RenderTarget {
 
 ### 7. Pomiar zasięgu widzenia (przygotowanie pod LOD)
 
-Miasto zasłania widok po dwóch przecznicach; pustkowie nie zasłania nic. `maxDepth = 62`
-komórek to 124 m — na otwartym terenie to zdecydowanie za mało, świat będzie się urywał
-tuż przed nosem.
+Miasto zasłania widok po dwóch przecznicach; pustkowie nie zasłania nic. Scena
+referencyjna i gra jadą na `maxDepth = 64` komórek, czyli **128 m** przy 2 m na komórkę
+(`createRenderContext` ma domyślnie 96 komórek = 192 m, ale ani harness, ani gra z tego
+nie korzystają). Na otwartym terenie 128 m to zdecydowanie za mało — świat będzie się
+urywał tuż przed nosem.
 
 Nie implementuj LOD w M1. **Zmierz i zaraportuj**, ile kosztuje wydłużenie zasięgu:
 
-| Scena | maxDepth 62 | 120 | 200 |
+| Scena | maxDepth 64 (128 m) | 120 (240 m) | 200 (400 m) |
 |---|---|---|---|
 | łąka (pusto) | ? | ? | ? |
 | las gęsty | ? | ? | ? |
