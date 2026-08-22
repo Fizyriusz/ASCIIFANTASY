@@ -119,30 +119,60 @@ Zapis po 200 h gry powinien mieć < 2 MB. Jeśli rośnie szybciej — coś zapis
 
 Zastępuje obecny „DDA + floor-casting". Jedna pętla obsługuje teren, budynki, wnętrza.
 
+Kolumna ma **dwa fronty wypełniania**: `loRow` idzie od dołu ekranu w górę,
+`hiRow` od góry w dół. Kolumna kończy się, gdy fronty się zetkną.
+
 ```
 dla każdej kolumny ekranu:
-  minRow = rows                    # najwyższy zamalowany wiersz
+  loRow = rows                     # najwyższy wiersz zamalowany od dołu
+  hiRow = -1                       # najniższy wiersz zamalowany od góry
+  floorZ = wysokość powierzchni pod kamerą     # zaczep frontu dolnego
+  ceilZ  = wysokość sufitu nad kamerą          # zaczep frontu górnego
+
   DDA po siatce, krok po komórce:
-    dla każdego spanu w komórce (od góry):
-      rowTop = project(span.top, dist)
-      rowBot = project(span.bottom, dist)
-      jeśli rowTop >= minRow: pomiń (zasłonięty)
-      maluj czapkę spanu: rowTop .. min(rowBot, minRow-1)  → capMat
-      maluj ścianę boczną poniżej, jeśli widoczna       → mat
-      minRow = rowTop
-    jeśli minRow <= 0: przerwij kolumnę
+    # --- front dolny: spany, na które patrzymy z góry (bottom < eyeZ) ---
+    dla każdego takiego spanu, od góry:
+      rowSurf = project(span.top, dist)
+      jeśli rowSurf >= loRow: pomiń                    # zasłonięty w całości
+      capZ = min(floorZ, span.top)                     # niższa z powierzchni
+      wallEnd = project(max(capZ, span.bottom), dist)  # ściana ma własny spód
+      maluj ścianę:  rowSurf .. wallEnd-1                        → mat
+      maluj czapkę:  wallEnd .. loRow-1, floor-cast na z = capZ  → capMat(capZ)
+      loRow = rowSurf;  floorZ = span.top
+      jeśli span.top > eyeZ: przerwij kolumnę          # bryła przecina poziom oka
+
+    # --- front górny: sufity i spody mostów (bottom >= eyeZ), lustrzanie ---
+    dla każdego takiego spanu, od dołu:
+      rowSurf = project(span.bottom, dist)
+      jeśli rowSurf <= hiRow: pomiń
+      capZ = max(ceilZ, span.bottom)                   # wyższa z powierzchni
+      wallStart = project(min(capZ, span.top), dist)   # ściana ma własny szczyt
+      maluj spód:   hiRow+1 .. wallStart-1, floor-cast na z = capZ → capMat(capZ)
+      maluj ścianę: wallStart .. rowSurf                          → mat
+      hiRow = rowSurf;  ceilZ = span.bottom
+
+    jeśli hiRow + 1 >= loRow: przerwij kolumnę         # ekran zapełniony
 ```
 
 To jest render voxel-space (Comanche) uogólniony na spany. Zalety: teren, mosty i sufity
 z jednego kodu; brak osobnego floor-castingu; naturalne zasłanianie.
 
+**Dlaczego dwa fronty, a nie jeden.** Pojedynczy front rosnący w górę renderuje
+poprawnie wszystko, na co patrzymy z góry, ale gubi każdą powierzchnię nad okiem —
+spód mostu i sufit wnętrza. To są dokładnie te dwa przypadki, dla których w ogóle
+rezygnujemy z „jednej wysokości na komórkę", więc front górny jest wymaganiem, nie
+ozdobą.
+
+**Dlaczego podział czapka/ściana bierze się z poprzedniej powierzchni w kolumnie,
+a nie z dolnej krawędzi spanu.** Pasek między rzutem poprzedniej powierzchni a rzutem
+bieżącej to pionowy uskok — ściana. Wszystko poniżej to płaszczyzna pozioma — czapka.
+Dla płaskiego terenu obie wysokości są równe, ściana wychodzi pusta i zostaje sama
+czapka; dla budynku ściana to fasada, a czapka to pasek ulicy u jej stóp. Reguła oparta
+na `span.bottom` maluje fasadę materiałem dachu. Ograniczenie ściany **własną** krawędzią
+spanu jest równie konieczne: bez niego przęsło mostu oglądane z dołu zamalowuje niebo.
+
 **Wnętrza**: gracz wewnątrz = zwykły przypadek — nad nim jest span sufitu, więc kolumna
 kończy się na nim. Portale (drzwi) to flaga na spanie, nie osobny system.
-
-**Uwaga do szkicu powyżej**: implementacja z M0 trzyma **dwa** fronty wypełniania —
-`loRow` rosnący w górę i `hiRow` schodzący w dół — bo pojedynczy `minRow` gubi
-powierzchnie nad okiem. Szczegóły i poprawiony podział na czapkę i ścianę:
-`docs/zadania/M0-rdzen-renderera.md` §3 oraz komentarz na górze `packages/core/src/raymarch.ts`.
 
 **Znane ograniczenie: otwór w środku kolumny.** Dwa fronty opisują stan kolumny
 dwiema liczbami, więc kolumna jest zawsze *spójna* — zamalowana od dołu i od góry,
