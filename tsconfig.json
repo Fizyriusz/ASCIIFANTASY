@@ -18,7 +18,9 @@
       "@rpg/core": ["packages/core/src/index.ts"],
       "@rpg/core/*": ["packages/core/src/*"],
       "@rpg/world": ["packages/world/src/index.ts"],
-      "@rpg/world/*": ["packages/world/src/*"]
+      "@rpg/world/*": ["packages/world/src/*"],
+      "@rpg/content": ["packages/content/src/index.ts"],
+      "@rpg/content/*": ["packages/content/src/*"]
     }
   },
   "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts", "tools/*/src/**/*.ts"]

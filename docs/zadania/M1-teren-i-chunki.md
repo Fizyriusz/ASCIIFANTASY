@@ -25,6 +25,7 @@ packages/world/src/props.ts           ← nowy
 packages/world/src/chunk.ts           ← nowy
 packages/world/src/streaming.ts       ← nowy
 packages/world/src/grid.ts            ← usunięcie buildTestCity
+packages/world/src/packs/neon.ts      ← nowy: generator miasta (patrz §1)
 packages/world/src/index.ts
 packages/core/src/materials.ts        ← paleta fantasy + wsparcie paczek
 tools/harness/src/fixtures/           ← nowy katalog
@@ -65,9 +66,14 @@ interface ContentPack {
 }
 ```
 
-**Paczka `neon`** to przeniesione `buildTestCity` plus jego materiały. Nie jest podpięta
-do gry, ale **musi się budować i mieć własny snapshot** — inaczej po trzech milestone'ach
-cicho zgnije. Traktuj ją jako test regresji na tezę „setting to dane".
+**Paczka `neon`** to materiały miasta z M0. Sam generator (`buildNeonCity`) **zostaje
+w `packages/world/src/packs/neon.ts`**, a nie w paczce contentu: `content` leży najniżej
+w łańcuchu zależności z CLAUDE.md, więc nie może importować `Span` ani `SpanGrid`, a
+generator bez nich nie istnieje. W paczce są dane, w `world` kod, który z nich buduje.
+
+Paczka nie jest podpięta do gry, ale **musi się budować i mieć własny snapshot** —
+inaczej po trzech milestone'ach cicho zgnije. Traktuj ją jako test regresji na tezę
+„setting to dane".
 
 **Paczka `wild`** — materiały: ziemia, trawa, mech, kamień, skała, piasek, żwir, woda,
 kora, listowie, iglaki, martwe drewno, śnieg. Palety ziemiste i przygaszone; jaskrawy
@@ -157,15 +163,25 @@ urywał tuż przed nosem.
 
 Nie implementuj LOD w M1. **Zmierz i zaraportuj**, ile kosztuje wydłużenie zasięgu:
 
+**Wynik pomiaru (M1, przeglądarka, pierścień 9×9 pokrywający zasięg 400 m):**
+
 | Scena | maxDepth 64 (128 m) | 120 (240 m) | 200 (400 m) |
 |---|---|---|---|
-| łąka (pusto) | ? | ? | ? |
-| las gęsty | ? | ? | ? |
-| grzbiet z widokiem na dolinę | ? | ? | ? |
+| łąka (pusto) | 1,31 ms | 1,84 ms | 1,90 ms |
+| las gęsty | 1,00 ms | 1,45 ms | 1,81 ms |
+| grzbiet z widokiem na dolinę | 1,83 ms | 3,29 ms | 3,81 ms |
 
-Jeśli którykolwiek wynik przy zasięgu dającym sensowny widok przekracza 8 ms —
-uruchamiamy `M1b-lod-sylwetkowy.md`. Jeśli mieści się w budżecie, LOD odpada
-i oszczędzamy tydzień. Decyzja z liczb, nie z przeczucia.
+**Rekomendacja: M1b nie jest potrzebny.** Najgorszy przypadek przy 400 m to 3,81 ms,
+czyli mniej niż połowa budżetu. Powód jest strukturalny: kolumna kończy marsz, gdy
+fronty się spotkają, więc wydłużenie zasięgu dokłada koszt tylko tam, gdzie niebo
+sięga nisko nad horyzont.
+
+Koszt wydłużenia zasięgu siedzi gdzie indziej — w **streamingu**. Żeby zobaczyć 400 m,
+pierścień musi mieć promień 4 (81 chunków zamiast 25): 313 ms generacji rozłożonej na
+81 klatek i ok. 18 MB pamięci. Pomiar przy pierścieniu 5×5 pokazywał 2,14 ms dla łąki
+przy zasięgu 200, ale była to iluzja: promienie wychodziły poza załadowany świat po
+~160 komórkach i mierzyły marsz po pustce. Dlatego `ChunkStore` przyjmuje promień
+w konstruktorze — zasięg widzenia i zasięg streamingu muszą rosnąć razem.
 
 ### 8. `apps/game/src/main.ts`
 

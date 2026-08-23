@@ -1,9 +1,9 @@
 /**
- * Siatka spanów trzymana w pamięci — magazyn na potrzeby M0.
+ * Siatka spanów trzymana w pamięci — mały, ręcznie zapełniany świat.
  *
- * To NIE jest generacja proceduralna: chunki, streaming i warstwy generacji to
- * M1. Tutaj chodzi wyłącznie o to, żeby renderer miał na czym pracować i żeby
- * dało się ręcznie ustawić komórkę z mostem albo sufitem.
+ * Po M1 generacja właściwa mieszka w `chunk.ts` i `streaming.ts`; ta klasa
+ * zostaje jako magazyn do scen testowych i do paczki `neon`, gdzie świat jest
+ * skończony i budowany wprost, a nie streamowany.
  *
  * Zawijanie współrzędnych maską (rozmiar = potęga dwójki) jak w prototypie:
  * świat testowy jest przez to nieskończony, a renderer nie ma ani jednego
@@ -15,9 +15,7 @@
  */
 
 import type { RenderTarget } from '@rpg/core';
-import type { MaterialId, Span, SpanFlagMask } from './types.js';
-import { SpanFlags } from './types.js';
-import { h32, mulberry32, vnoise } from './rng.js';
+import type { Span } from './types.js';
 
 /**
  * Ile spanów mieści komórka. Cztery wystarczają na teren + budynek + most +
@@ -168,125 +166,4 @@ export class SpanGrid implements RenderTarget {
   light(cx: number, cy: number): number {
     return this.lights[this.index(cx, cy)] ?? 15;
   }
-}
-
-/* ------------------------------------------------------------------ *
- * Miasto testowe. Tymczasowe — w M1 zastąpi je generacja warstwowa.
- * ------------------------------------------------------------------ */
-
-/** Materiały: indeksy do MATERIALS z @rpg/core. Trzymane lokalnie, żeby nie
- *  wiązać generacji z enumem renderera na tym etapie. */
-const MAT_STONE = 0;
-const MAT_PLASTER = 1;
-const MAT_GLASS = 2;
-const MAT_ASPHALT = 3;
-const MAT_PAVEMENT = 4;
-const MAT_GRASS = 5;
-const MAT_WOOD = 7;
-const MAT_LAMP = 9;
-
-const CITY_SIZE = 64;
-/** ulice co 8 komórek, aleje co 32 — układ z prototypu */
-const BLOCK = 8;
-const AVENUE = 32;
-
-function isRoad(x: number, y: number): boolean {
-  return (
-    (x & (BLOCK - 1)) === 0 ||
-    (y & (BLOCK - 1)) === 0 ||
-    (x > 0 && (x - 1) % AVENUE === 0) ||
-    (y > 0 && (y - 1) % AVENUE === 0)
-  );
-}
-
-function span(
-  bottom: number,
-  top: number,
-  mat: MaterialId,
-  capMat: MaterialId,
-  flags: SpanFlagMask,
-): Span {
-  return { bottom, top, mat, capMat, flags };
-}
-
-/**
- * Odtwarza układ z prototypu: siatka ulic, chodniki przy jezdni, kwartały
- * budynków 1–3 komórek, wysokości z szumu. Świadomie prymitywne — jedyne, co
- * musi być prawdą, to determinizm i sensowne proporcje do oglądania renderera.
- */
-export function buildTestCity(seed: number): SpanGrid {
-  const grid = new SpanGrid(CITY_SIZE, CITY_SIZE);
-
-  // 1. teren: jezdnia, chodnik, trawnik działki
-  for (let y = 0; y < CITY_SIZE; y++) {
-    for (let x = 0; x < CITY_SIZE; x++) {
-      const road = isRoad(x, y);
-      const nextToRoad =
-        !road &&
-        (isRoad(x + 1, y) || isRoad(x - 1, y) || isRoad(x, y + 1) || isRoad(x, y - 1));
-      const capMat = road ? MAT_ASPHALT : nextToRoad ? MAT_PAVEMENT : MAT_GRASS;
-      const topZ = road ? 0 : nextToRoad ? 0.2 : 0.15;
-      grid.setColumn(x, y, [span(-4, topZ, MAT_STONE, capMat, SpanFlags.Solid)]);
-    }
-  }
-
-  // 2. budynki na działkach — kwartały 1–3 komórek, wysokość z gęstości dzielnicy
-  for (let y = 0; y < CITY_SIZE; y++) {
-    for (let x = 0; x < CITY_SIZE; x++) {
-      if (isRoad(x, y)) continue;
-      if (isRoad(x + 1, y) || isRoad(x - 1, y) || isRoad(x, y + 1) || isRoad(x, y - 1)) continue;
-      if (grid.spanCount(x, y) > 1) continue; // już zabudowane przez sąsiada
-
-      const lot = mulberry32(h32(x, y, seed, 5));
-      if (lot() < 0.12) continue; // pusta działka / skwer
-
-      const density = vnoise(x / 26, y / 26, seed + 3);
-      const w = 1 + ((lot() * 3) | 0);
-      const d = 1 + ((lot() * 3) | 0);
-      const height = 4 + Math.pow(density, 2.2) * 34 * (0.4 + 0.6 * lot());
-      const wallMat = lot() < 0.35 ? MAT_GLASS : lot() < 0.7 ? MAT_PLASTER : MAT_STONE;
-
-      for (let dy = 0; dy < d; dy++) {
-        for (let dx = 0; dx < w; dx++) {
-          const bx = x + dx;
-          const by = y + dy;
-          if (bx >= CITY_SIZE || by >= CITY_SIZE) continue;
-          if (isRoad(bx, by)) continue;
-          if (isRoad(bx + 1, by) || isRoad(bx - 1, by) || isRoad(bx, by + 1) || isRoad(bx, by - 1)) {
-            continue;
-          }
-          if (grid.spanCount(bx, by) > 1) continue;
-          grid.setColumn(bx, by, [
-            span(-4, 0.15, MAT_STONE, MAT_GRASS, SpanFlags.Solid),
-            span(0.15, height, wallMat, MAT_STONE, SpanFlags.Solid),
-          ]);
-          grid.setLight(bx, by, 12);
-        }
-      }
-    }
-  }
-
-  // 3. latarnie — pojedyncze świecące słupki na chodniku, co szesnastą komórkę
-  for (let y = 0; y < CITY_SIZE; y++) {
-    for (let x = 0; x < CITY_SIZE; x++) {
-      if (isRoad(x, y) || grid.spanCount(x, y) > 1) continue;
-      if ((x & 15) !== 4 || (y & 15) !== 4) continue;
-      grid.setColumn(x, y, [
-        span(-4, 0.2, MAT_STONE, MAT_PAVEMENT, SpanFlags.Solid),
-        span(0.2, 4.2, MAT_LAMP, MAT_LAMP, SpanFlags.Solid | SpanFlags.Emissive),
-      ]);
-    }
-  }
-
-  // 4. kładka nad aleją — jedyny element, którego prototyp nie umiał pokazać;
-  //    stoi tu po to, żeby model spanów było widać w żywej aplikacji, nie tylko
-  //    w snapshocie testowym
-  const bridgeY = 32;
-  for (let x = 28; x <= 36; x++) {
-    grid.setColumn(x, bridgeY, [
-      span(-4, isRoad(x, bridgeY) ? 0 : 0.2, MAT_STONE, MAT_ASPHALT, SpanFlags.Solid),
-      span(5, 5.8, MAT_WOOD, MAT_WOOD, SpanFlags.Solid),
-    ]);
-  }
-  return grid;
 }

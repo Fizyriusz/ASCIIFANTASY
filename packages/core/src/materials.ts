@@ -9,8 +9,13 @@
  * Hash liczymy z **współrzędnych świata**, nigdy ekranu. To nie jest detal
  * estetyczny: przy hashu z pozycji na ekranie tekstura płynie po fasadzie przy
  * każdym kroku gracza i wygląda jak błąd renderowania, którym jest.
+ *
+ * Same dane materiałów mieszkają w `@rpg/content` — tutaj jest wyłącznie ich
+ * kompilacja do postaci wygodnej dla hot pathu (stringi glifów → tablice kodów).
+ * Kierunek zależności: `core` czyta `content`, nigdy odwrotnie.
  */
 
+import type { MaterialDef } from '@rpg/content';
 import { h32 } from './hash.js';
 
 export interface Material {
@@ -26,73 +31,35 @@ export interface Material {
   emissive: number;
 }
 
-/**
- * Indeksy do MATERIALS. Świat trzyma w spanach `MaterialId` (number), więc to
- * jest wyłącznie wygoda przy budowaniu treści — renderer indeksuje liczbą.
- *
- * Obiekt `as const`, nie `const enum`: ten drugi znika przy transpilacji per
- * plik i jego użycie przez granicę pakietu zależy od bundlera.
- */
-export const Mat = {
-  Stone: 0,
-  Plaster: 1,
-  Glass: 2,
-  Asphalt: 3,
-  Pavement: 4,
-  Grass: 5,
-  Water: 6,
-  Wood: 7,
-  Metal: 8,
-  Lamp: 9,
-} as const;
-
-/** Jeden z indeksów materiału. */
-export type Mat = (typeof Mat)[keyof typeof Mat];
-
 function codes(s: string): readonly number[] {
   const out = new Array<number>(s.length);
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
   return out;
 }
 
-function material(
-  bright: string,
-  mid: string,
-  dark: string,
-  r: number,
-  g: number,
-  b: number,
-  roughness: number,
-  emissive: number,
-): Material {
-  return {
-    glyphsBright: codes(bright),
-    glyphsMid: codes(mid),
-    glyphsDark: codes(dark),
-    r,
-    g,
-    b,
-    roughness,
-    emissive,
-  };
-}
-
 /**
- * Tablica materiałów, indeksowana przez MaterialId. Kolejność musi się zgadzać
- * z enumem `Mat` — indeks jest kontraktem, bo świat zapisuje go w spanie.
+ * Zamienia definicje z paczki settingu na tablicę materiałów renderera.
+ * Wołane raz przy starcie sceny — indeks w wyniku odpowiada indeksowi w paczce,
+ * bo to właśnie ten indeks świat zapisuje w spanie.
  */
-export const MATERIALS: readonly Material[] = [
-  /* Stone    */ material('#%&', '=+*', ':.', 150, 150, 160, 0.75, 0),
-  /* Plaster  */ material('8OB', 'o=-', '.,', 205, 195, 170, 0.55, 0),
-  /* Glass    */ material('#=|', '|:-', '.', 120, 190, 220, 0.35, 0.15),
-  /* Asphalt  */ material('=-', '-:', '.', 74, 74, 82, 0.6, 0),
-  /* Pavement */ material('##=', '::-', '.', 124, 124, 132, 0.5, 0),
-  /* Grass    */ material('"w%', ',v:', '.', 74, 148, 74, 0.9, 0),
-  /* Water    */ material('~-', '~:', '.', 60, 120, 200, 0.8, 0.05),
-  /* Wood     */ material('HB#', '=+-', ':.', 142, 96, 56, 0.65, 0),
-  /* Metal    */ material('M8#', '#=-', ':.', 170, 175, 185, 0.45, 0),
-  /* Lamp     */ material('*@', '+o', '.', 255, 220, 140, 0.3, 1),
-];
+export function compileMaterials(defs: readonly MaterialDef[]): Material[] {
+  const out = new Array<Material>(defs.length);
+  for (let i = 0; i < defs.length; i++) {
+    const d = defs[i];
+    if (d === undefined) continue;
+    out[i] = {
+      glyphsBright: codes(d.bright),
+      glyphsMid: codes(d.mid),
+      glyphsDark: codes(d.dark),
+      r: d.r,
+      g: d.g,
+      b: d.b,
+      roughness: d.roughness,
+      emissive: d.emissive,
+    };
+  }
+  return out;
+}
 
 /**
  * Luminancja → pasmo → hash pozycji świata → konkretny glif.

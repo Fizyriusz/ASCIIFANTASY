@@ -7,7 +7,7 @@ export type { Blittable, BlitStats } from './blit.js';
 export { computeMetrics, CELL_BUDGET, DEFAULT_TARGET_COLS } from './metrics.js';
 export { RAMP_DENSE, RAMP_SOFT, rampGlyph } from './glyphs.js';
 export { h32 } from './hash.js';
-export { MATERIALS, Mat, materialGlyph } from './materials.js';
+export { compileMaterials, materialGlyph } from './materials.js';
 export type { Material } from './materials.js';
 export type { Camera, ColumnHits, RenderTarget, RenderContext, RenderOptions } from './raymarch.js';
 export { MAX_HITS, createColumnHits, createRenderContext, renderWorld, renderColumn } from './raymarch.js';
