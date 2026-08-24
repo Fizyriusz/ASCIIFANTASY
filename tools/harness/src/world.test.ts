@@ -3,12 +3,14 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderWorld } from '@rpg/core';
-import { wildPack } from '@rpg/content';
+import { inkOf, wildPack, WildMat } from '@rpg/content';
 import {
   CELL_METERS,
   CHUNK_SIZE,
   ChunkStore,
   MAX_SPANS_PER_CELL,
+  SpanFlags,
+  SpanGrid,
   carveHeight,
   clearRiverCache,
   generateChunk,
@@ -262,23 +264,42 @@ describe('stabilność obrazu w ruchu', () => {
    * w ruchu właśnie się posypał.
    */
   const KROK_METRY = 0.05;
-  /** cały kadr, razem z krawędziami sylwetek */
-  const PROG_SREDNIA = 6.5;
-  const PROG_WIERSZ = 12.5;
+  /**
+   * Cały kadr, razem z krawędziami sylwetek. Progi poluzowane względem M1, bo
+   * M1c przywrócił `roughness` materiałów — samych zmian jest z definicji więcej.
+   * Tym, co pilnuje jakości obrazu, jest teraz metryka ważona poniżej.
+   */
+  const PROG_SREDNIA = 9;
+  const PROG_WIERSZ = 16;
   /**
    * Same powierzchnie: liczymy wyłącznie komórki zamalowane w obu klatkach.
    * Ta metryka pomija migotanie krawędzi — nieusuwalne, bo sylwetka drzewa
    * naprawdę przesuwa się przy chodzeniu — i przez to znacznie ostrzej łapie
    * to, co faktycznie boli: przeskakujący glif na dużej, jednolitej powierzchni.
    */
-  const PROG_POWIERZCHNIE = 6;
+  /**
+   * Metryka ważona pokryciem atramentem, per scena, z progiem = wynik z M1.
+   * Sens tego progu: M1 kupił spokój wyłączeniem faktury (`roughness` 0,15–0,2),
+   * M1c ma być **spokojniejszy mimo pełnej faktury** (0,5–0,7). Jeśli ten test
+   * zapali się po zmianie materiału albo strojenia, to znaczy, że wróciliśmy do
+   * kupowania spokoju kosztem tekstury.
+   */
+  const PROG_WAZONA_M1: Record<string, number> = {
+    hills: 1.33,
+    forest: 0.34,
+    river: 1.02,
+    ridge: 0.98,
+    seam: 0.28,
+  };
+
+  const PROG_POWIERZCHNIE = 9;
   /**
    * Średnia z trzech najgorszych wierszy, nie z jednego. Pojedynczy wiersz jest
    * zbyt czuły: centymetr różnicy w wysokości kamery przesuwa go o 2,7 punktu,
    * bo zmienia się, który wycinek świata do niego trafia. Trójka jest stabilna,
    * a nadal pokazuje pas migotania zamiast rozmyć go w średniej po całym kadrze.
    */
-  const PROG_NAJGORSZE_3 = 10.5;
+  const PROG_NAJGORSZE_3 = 16;
 
   interface Flicker {
     overall: number;
@@ -286,6 +307,7 @@ describe('stabilność obrazu w ruchu', () => {
     peakRow: number;
     surface: number;
     worst3: number;
+    weighted: number;
   }
 
   function flicker(view: keyof typeof WILD_VIEWS): Flicker {
@@ -311,6 +333,7 @@ describe('stabilność obrazu w ruchu', () => {
     let changed = 0;
     let both = 0;
     let bothChanged = 0;
+    let ink = 0;
     let peak = 0;
     let peakRow = -1;
     const surfaceRows: number[] = [];
@@ -324,6 +347,7 @@ describe('stabilność obrazu w ruchu', () => {
         const cb = b.chars[r * b.cols + c] ?? 0;
         if (ca !== 0 || cb !== 0) pr++;
         if (ca !== cb) cr++;
+        ink += Math.abs(inkOf(ca) - inkOf(cb));
         if (ca !== 0 && cb !== 0) {
           br++;
           if (ca !== cb) bcr++;
@@ -352,6 +376,7 @@ describe('stabilność obrazu w ruchu', () => {
       peakRow,
       surface: (bothChanged / both) * 100,
       worst3,
+      weighted: (ink / painted) * 100,
     };
   }
 
@@ -362,8 +387,96 @@ describe('stabilność obrazu w ruchu', () => {
       expect(f.peak).toBeLessThan(PROG_WIERSZ);
       expect(f.surface).toBeLessThan(PROG_POWIERZCHNIE);
       expect(f.worst3).toBeLessThan(PROG_NAJGORSZE_3);
+      expect(f.weighted).toBeLessThan(PROG_WAZONA_M1[view] ?? 1);
     });
   }
+
+  it('faktura z bliska przetrwała wygaszanie', () => {
+    // Zabezpieczenie przed „naprawą przez wygładzenie wszystkiego": ściana
+    // z 2 m musi pokazywać pełną rampę pasma, a nie jeden glif podstawowy.
+    // To jest warunek, żeby ściany lochu w M2 nie wyglądały jak płyty.
+    const grid = new SpanGrid(32, 32);
+    for (let y = 0; y < 32; y++) {
+      for (let x = 0; x < 32; x++) {
+        grid.setColumn(x, y, [
+          { bottom: -4, top: 0, mat: WildMat.Dirt, capMat: WildMat.Grass, flags: SpanFlags.Solid },
+        ]);
+      }
+    }
+    for (let x = 0; x < 32; x++) {
+      grid.setColumn(x, 18, [
+        { bottom: -4, top: 6, mat: WildMat.Bark, capMat: WildMat.Bark, flags: SpanFlags.Solid },
+      ]);
+    }
+    const screen = referenceScreen();
+    // kamera dokładnie 1 komórkę = 2 m przed ścianą
+    renderWorld(
+      grid,
+      { x: 16.5, y: 17, eyeZ: 1.7, yaw: Math.PI / 2, pitch: 0, fov: (74 * Math.PI) / 180 },
+      screen,
+      wildContext(),
+    );
+    const glyphs = new Set<number>();
+    for (let r = 0; r < 30; r++) {
+      for (let c = 0; c < screen.cols; c++) {
+        const ch = screen.chars[r * screen.cols + c] ?? 0;
+        if (ch !== 0) glyphs.add(ch);
+      }
+    }
+    // rampa jasna kory ma trzy glify — wszystkie mają się pojawić
+    expect(glyphs.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('przejście między poziomami kroku hasha nie daje piku', () => {
+    // Krok hasha skacze po potęgach dwójki. Przejście między poziomami musi być
+    // rzadkie i nie głośniejsze niż zwykły krok — inaczej zamiast migotania
+    // dostajemy stroboskop co kilka metrów.
+    const grid = new SpanGrid(32, 32);
+    for (let y = 0; y < 32; y++) {
+      for (let x = 0; x < 32; x++) {
+        grid.setColumn(x, y, [
+          { bottom: -4, top: 0, mat: WildMat.Dirt, capMat: WildMat.Grass, flags: SpanFlags.Solid },
+        ]);
+      }
+    }
+    for (let x = 0; x < 32; x++) {
+      grid.setColumn(x, 18, [
+        { bottom: -4, top: 6, mat: WildMat.Bark, capMat: WildMat.Bark, flags: SpanFlags.Solid },
+      ]);
+    }
+    const ctx = wildContext();
+    const a = referenceScreen();
+    const b = referenceScreen();
+    let prev: typeof a | null = null;
+    const steps: number[] = [];
+    for (let i = 0; i <= 40; i++) {
+      const cam = {
+        x: 16.5,
+        y: 17 - (i * 0.5) / CELL_METERS,
+        eyeZ: 1.7,
+        yaw: Math.PI / 2,
+        pitch: 0,
+        fov: (74 * Math.PI) / 180,
+      };
+      const target = i % 2 === 0 ? a : b;
+      renderWorld(grid, cam, target, ctx);
+      if (prev !== null) {
+        let painted = 0;
+        let ink = 0;
+        for (let k = 0; k < target.chars.length; k++) {
+          const ca = prev.chars[k] ?? 0;
+          const cb = target.chars[k] ?? 0;
+          if (ca !== 0 || cb !== 0) painted++;
+          ink += Math.abs(inkOf(ca) - inkOf(cb));
+        }
+        steps.push((ink / painted) * 100);
+      }
+      prev = target;
+    }
+    const sorted = [...steps].sort((x, y) => x - y);
+    const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+    expect(Math.max(...steps)).toBeLessThan(median * 2.5);
+  });
 });
 
 describe('budżety świata', () => {

@@ -325,7 +325,10 @@ export function renderColumn(
   let lightF = 1;
   let uWorld = 0;
   let uFrac = 0;
-  let hu = 0;
+  let uMetres = 0;
+  let wallAxisM = 0;
+  let wallFoot = 0;
+  let capFoot = 0;
   let n = 0;
   let i = 0;
   let top = 0;
@@ -381,7 +384,11 @@ export function renderColumn(
       // inaczej tekstura fasady skacze o komórkę przy każdym kroku gracza
       uWorld = side === 0 ? cam.y + dist * rdy : cam.x + dist * rdx;
       uFrac = uWorld - Math.floor(uWorld);
-      hu = Math.floor(uWorld * 4);
+      uMetres = uWorld * mpc;
+      wallAxisM = (side === 0 ? mapX : mapY) * mpc;
+      // rzutowany rozmiar komórki na ścianie: pion rozciąga się mocniej niż poziom,
+      // bo kv < kh, więc to on decyduje o aliasingu
+      wallFoot = distM / kv;
 
       // --- front dolny: wszystko, na co patrzymy z góry (teren, bruk, fasady) ---
       for (i = n - 1; i >= 0; i--) {
@@ -424,7 +431,7 @@ export function renderColumn(
               screen.putUnsafe(
                 col,
                 row,
-                materialGlyph(wallM, lum, hu, Math.floor(zRow * 4), side === 0 ? mapX : mapY),
+                materialGlyph(wallM, lum, uMetres, zRow, wallAxisM, wallFoot),
                 shade(wallM.r, wallM.g, wallM.b, lum),
               );
             }
@@ -447,15 +454,20 @@ export function renderColumn(
               dCapCells = dCapM * invMpc;
               lum = lightF * Math.exp(-dCapM / fogDist);
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
+              // czapka jest pozioma, więc w głąb rozciąga się dużo mocniej niż
+              // w poprzek: przy horyzoncie jeden wiersz to dziesiątki metrów
+              capFoot = dCapM / den;
+              if (dCapM / ctx.kh > capFoot) capFoot = dCapM / ctx.kh;
               screen.putUnsafe(
                 col,
                 row,
                 materialGlyph(
                   capM,
                   lum,
-                  Math.floor((cam.x + rdx * dCapCells) * 4),
-                  Math.floor((cam.y + rdy * dCapCells) * 4),
-                  Math.floor(capZ * 2),
+                  (cam.x + rdx * dCapCells) * mpc,
+                  (cam.y + rdy * dCapCells) * mpc,
+                  capZ,
+                  capFoot,
                 ),
                 shade(capM.r, capM.g, capM.b, lum),
               );
@@ -532,15 +544,18 @@ export function renderColumn(
               dCapCells = dCapM * invMpc;
               lum = lightF * Math.exp(-dCapM / fogDist);
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
+              capFoot = dCapM / den;
+              if (dCapM / ctx.kh > capFoot) capFoot = dCapM / ctx.kh;
               screen.putUnsafe(
                 col,
                 row,
                 materialGlyph(
                   capM,
                   lum,
-                  Math.floor((cam.x + rdx * dCapCells) * 4),
-                  Math.floor((cam.y + rdy * dCapCells) * 4),
-                  Math.floor(capZ * 2),
+                  (cam.x + rdx * dCapCells) * mpc,
+                  (cam.y + rdy * dCapCells) * mpc,
+                  capZ,
+                  capFoot,
                 ),
                 shade(capM.r, capM.g, capM.b, lum),
               );
@@ -557,7 +572,7 @@ export function renderColumn(
               screen.putUnsafe(
                 col,
                 row,
-                materialGlyph(wallM, lum, hu, Math.floor(zRow * 4), side === 0 ? mapX : mapY),
+                materialGlyph(wallM, lum, uMetres, zRow, wallAxisM, wallFoot),
                 shade(wallM.r, wallM.g, wallM.b, lum),
               );
             }

@@ -205,6 +205,28 @@ Dobór znaku: `luminancja → rampa → hash(pozycja świata) → konkretny glif
 Hash po **współrzędnych świata**, nie ekranu — inaczej tekstura „pływa" przy chodzeniu.
 To jest błąd numer jeden w takich rendererach.
 
+**Stabilność tekstury przy ruchu (wnioski z M1).** Hash po współrzędnych świata usuwa
+pływanie, ale nie usuwa **aliasingu**: jedna komórka ekranu pokrywa tym większy kawałek
+świata, im dalej patrzy, więc przy 50 m punkt próbkowania przeskakuje przy ruchu przez
+dziesiątki kratek hasha i glif losuje się od nowa co klatkę. Pod horyzontem daje to pas
+migotania.
+
+W M1 stłumiono to obniżeniem `roughness` w paczce contentu i wygładzeniem wysokości
+kamery. Wygładzenie kamery było poprawką właściwą — skok oka o 0,2 m przepróbkowywał
+57,8% komórek naraz. Obniżenie `roughness` **nie było naprawą próbkowania** i warto to
+zapisać wprost, bo pierwotny raport zawierał skrót logiczny: „przy `roughness = 0`
+migotanie znika, więc kwantyzacja nie jest wąskim gardłem". Kwantyzacja i `roughness`
+to nie dwie niezależne przyczyny, tylko ten sam kanał — hash decyduje, *który* glif,
+a `roughness` decyduje, *jak mocno* hash wpływa na wybór. Wyzerowanie `roughness` nie
+testuje kwantyzacji, tylko wyłącza teksturę; aliasing znika, bo znika sygnał, który się
+aliasował. Daleka trawa jest spokojna, **ponieważ jest jednorodna**, a nie dlatego, że
+próbkowanie zostało naprawione.
+
+Cena jest odroczona i płatna w M2: ściana lochu stoi metr od oka i to właśnie `roughness`
+daje jej strukturę. Właściwe rozwiązanie — krok hasha i `roughness` zależne od rzutowanego
+rozmiaru komórki, czyli jedyny odpowiednik mipmapy dostępny w rendererze znakowym —
+jest zakresem `docs/zadania/M1c-stabilnosc-tekstury.md`.
+
 ### 3.3 Światło = mechanika
 
 - **statyczne**: flood fill po komórkach przy generacji chunka, 0..15, jak w Minecrafcie

@@ -29,31 +29,35 @@ export const WildMat = {
 export type WildMat = (typeof WildMat)[keyof typeof WildMat];
 
 /**
- * Uwaga do `roughness` i powtórzeń w rampach: glif komórki wynika z hasha pozycji
- * świata, a przy chodzeniu każda komórka ekranu próbkuje inne miejsce świata.
- * Im wyższy `roughness`, tym częściej hash schodzi z glifu podstawowego — i tym
- * mocniej powierzchnia migocze w ruchu. Materiały gruntu, które zajmują pół
- * ekranu, mają więc niski `roughness`, a glif podstawowy jest w rampie powtórzony,
- * żeby nawet trafienie w gałąź szumu najczęściej wypadało na ten sam znak.
+ * Dobór glifów w rampie: wariacja ma iść w **kształt**, nie w **ciężar**.
+ * Tabela `INK_COVERAGE` mówi, ile atramentu zajmuje glif; rampa mchu `&%@` miała
+ * rozrzut 0,40–0,62, więc każda zamiana `&` na `@` była skokiem wagi o 0,17
+ * i czytała się jako mruganie, a nie jako faktura. Rampy poniżej trzymają
+ * rozrzut poniżej ~0,1 przy zachowanych trzech różnych kształtach.
+ *
+ * `roughness` opisuje **materiał**, a nie strategię tłumienia migotania: kora jest
+ * szorstka, woda gładka, kamień pośrodku. W M1 wartości te zbito do 0,15–0,2, żeby
+ * uciszyć aliasing dalekiego gruntu — to działało, ale kosztem faktury z bliska.
+ * Po M1c aliasingiem zajmuje się renderer (krok hasha i wygaszanie `roughness`
+ * rosnące z rzutowanym rozmiarem komórki), więc dane wracają do opisu materiału.
  */
 const materials: readonly MaterialDef[] = [
-  { id: 'dirt', bright: '%%&', mid: '==-', dark: '::.', r: 118, g: 94, b: 68, roughness: 0.35, emissive: 0 },
-  { id: 'grass', bright: '"""w', mid: ',,,v', dark: '..', r: 96, g: 132, b: 68, roughness: 0.2, emissive: 0 },
-  { id: 'moss', bright: '&&&%', mid: '***o', dark: '::.', r: 78, g: 112, b: 74, roughness: 0.2, emissive: 0 },
-  { id: 'stone', bright: '##%&', mid: '==+*', dark: '::.', r: 138, g: 138, b: 146, roughness: 0.35, emissive: 0 },
-  { id: 'rock', bright: '@@#8', mid: '##=+', dark: '**:', r: 112, g: 108, b: 104, roughness: 0.3, emissive: 0 },
-  { id: 'sand', bright: ':::.', mid: '..,', dark: '.', r: 198, g: 178, b: 130, roughness: 0.25, emissive: 0 },
-  { id: 'gravel', bright: 'ooo:', mid: '::,', dark: '..', r: 150, g: 142, b: 128, roughness: 0.35, emissive: 0 },
-  // Woda czyta się w ASCII wtedy, gdy tworzy długie poziome serie. Rampa z ':'
-  // i '.' rozbijała lustro na szum nie do odróżnienia od gruntu, dlatego wszystkie
-  // trzy pasma trzymają się '~' i '-', a roughness jest niska — powierzchnia ma
-  // być gładka. Jaśniejszy błękit odsuwa ją od zieleni brzegu.
-  { id: 'water', bright: '~~-', mid: '~--', dark: '--', r: 82, g: 138, b: 196, roughness: 0.25, emissive: 0.05 },
-  { id: 'bark', bright: 'HHHB', mid: '|||=', dark: '::.', r: 104, g: 76, b: 52, roughness: 0.3, emissive: 0 },
-  { id: 'leaves', bright: '&&&%', mid: '***o', dark: '::.', r: 84, g: 124, b: 62, roughness: 0.25, emissive: 0 },
-  { id: 'conifer', bright: '^^^A', mid: '^^^*', dark: '::.', r: 56, g: 92, b: 66, roughness: 0.25, emissive: 0 },
-  { id: 'deadwood', bright: '==-|', mid: '--:.', dark: '..', r: 122, g: 106, b: 84, roughness: 0.35, emissive: 0 },
-  { id: 'snow', bright: '@@8O', mid: '**o+', dark: '::.', r: 226, g: 232, b: 240, roughness: 0.25, emissive: 0 },
+  { id: 'dirt', bright: '%&#', mid: '=~-', dark: ':.', r: 118, g: 94, b: 68, roughness: 0.5, emissive: 0 },
+  { id: 'grass', bright: '"v*', mid: ',v:', dark: '.', r: 96, g: 132, b: 68, roughness: 0.6, emissive: 0 },
+  { id: 'moss', bright: '&%#', mid: '*o+', dark: ':.', r: 78, g: 112, b: 74, roughness: 0.6, emissive: 0 },
+  { id: 'stone', bright: '#%&', mid: '=+*', dark: ':.', r: 138, g: 138, b: 146, roughness: 0.55, emissive: 0 },
+  { id: 'rock', bright: '#8%', mid: '#=+', dark: '*:', r: 112, g: 108, b: 104, roughness: 0.5, emissive: 0 },
+  { id: 'sand', bright: '::.', mid: '.,', dark: '.', r: 198, g: 178, b: 130, roughness: 0.35, emissive: 0 },
+  { id: 'gravel', bright: 'oo:', mid: ':,.', dark: '.', r: 150, g: 142, b: 128, roughness: 0.55, emissive: 0 },
+  // Woda jest tu jedynym materiałem trzymanym celowo gładko i z rampą złożoną
+  // z '~' i '-': lustro czyta się w ASCII wyłącznie wtedy, gdy tworzy długie
+  // poziome serie. To decyzja o czytelności, nie obejście migotania.
+  { id: 'water', bright: '~~-', mid: '~--', dark: '--', r: 82, g: 138, b: 196, roughness: 0.15, emissive: 0.05 },
+  { id: 'bark', bright: 'HB#', mid: '||=', dark: ':.', r: 104, g: 76, b: 52, roughness: 0.7, emissive: 0 },
+  { id: 'leaves', bright: '&%#', mid: '*o+', dark: ':.', r: 84, g: 124, b: 62, roughness: 0.7, emissive: 0 },
+  { id: 'conifer', bright: '^*+', mid: '^*+', dark: ':.', r: 56, g: 92, b: 66, roughness: 0.7, emissive: 0 },
+  { id: 'deadwood', bright: '=-|', mid: '-:.', dark: '.', r: 122, g: 106, b: 84, roughness: 0.65, emissive: 0 },
+  { id: 'snow', bright: '@8O', mid: '*o+', dark: ':.', r: 226, g: 232, b: 240, roughness: 0.3, emissive: 0 },
 ];
 
 export const WildProp = {
