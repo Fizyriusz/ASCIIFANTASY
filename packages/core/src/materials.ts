@@ -49,9 +49,10 @@ export interface Material {
 }
 
 /**
- * Strojenie faktury. Obiekt, a nie stałe, wyłącznie po to, żeby dało się je
- * przemiatać pomiarem — wartości domyślne są tymi wybranymi w M1c i nie ma
- * powodu ich zmieniać w czasie działania gry.
+ * Strojenie faktury, zamrożone. W trakcie M1c był to obiekt mutowalny, żeby dało
+ * się przemiatać wartości pomiarem; przemiatanie się skończyło, więc `as const`
+ * — nikt nie ma tego zmieniać w czasie działania gry, a silnik może te liczby
+ * traktować jak stałe.
  */
 export const TEXTURE_TUNING = {
   /**
@@ -71,7 +72,7 @@ export const TEXTURE_TUNING = {
   footFull: 0.6,
   /** metry: rzutowana komórka, przy której zostaje sam glif podstawowy */
   footFlat: 2.4,
-};
+} as const;
 
 function codes(s: string): readonly number[] {
   const out = new Array<number>(s.length);

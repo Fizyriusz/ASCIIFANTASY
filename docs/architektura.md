@@ -227,6 +227,20 @@ daje jej strukturę. Właściwe rozwiązanie — krok hasha i `roughness` zależ
 rozmiaru komórki, czyli jedyny odpowiednik mipmapy dostępny w rendererze znakowym —
 jest zakresem `docs/zadania/M1c-stabilnosc-tekstury.md`.
 
+**Asymetria footprintu: dlaczego wygaszanie omija ściany.** Rzutowany rozmiar komórki
+znakowej zależy nie tylko od odległości, ale przede wszystkim od **kąta padania**.
+Grunt oglądany pod ostrym kątem rozciąga się w głąb kilkadziesiąt razy mocniej niż
+w poprzek: z 5 m jedna komórka pokrywa **0,23–0,6 m** terenu, a przy horyzoncie idzie
+w setki metrów. Ściana z tej samej odległości 5 m ma footprint **0,03–0,13 m**, bo
+patrzymy na nią prostopadle i wiersz ekranu odpowiada wysokości, a nie głębi.
+
+Konsekwencja jest praktyczna i M2 może się na niej oprzeć jako na fakcie: wygaszanie
+faktury oparte na footprincie trafia w **grunt przy horyzoncie**, a ściany **z definicji
+omija** — żeby wygasić ścianę, trzeba by ją oddalić o kilkadziesiąt metrów. Wnętrza,
+lochy i korytarze, gdzie powierzchnie stoją prostopadle w odległości metrów, zachowują
+pełną fakturę materiału bez żadnego wyjątku w kodzie. To nie jest szczęśliwy zbieg
+okoliczności, tylko geometria rzutowania.
+
 ### 3.3 Światło = mechanika
 
 - **statyczne**: flood fill po komórkach przy generacji chunka, 0..15, jak w Minecrafcie

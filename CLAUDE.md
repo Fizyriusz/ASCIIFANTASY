@@ -91,6 +91,13 @@ zależności — projekt jest zły, zgłoś to zamiast obchodzić.
 - Funkcje generujące świat są **czyste**. Żadnego `Math.random()` w `packages/world`
   — wyłącznie `h32` / `mulberry32` z `@rpg/world/rng`. To jest sprawdzane testem.
 - Hash tekstury liczysz z **współrzędnych świata**, nigdy ekranu. Inaczej tekstura pływa.
+- **Wariacja glifów w rampie idzie w kształt, nie w ciężar.** Glify jednego pasma
+  mają mieć zbliżone pokrycie atramentem (tabela `INK_COVERAGE` w `packages/content`).
+  Skok wagi — na przykład `&` (0,45) wymienione na `@` (0,62) — oko czyta jako
+  migotanie, nawet gdy liczba zmienionych komórek jest niska. Pomiar z M1c: podmiana
+  jednego takiego glifu w rampie mchu zbiła metrykę ważoną z 0,55 na 0,34, podczas gdy
+  przemiatanie `roughness` koron w zakresie 0,35–0,7 nie ruszyło jej wcale. Ten
+  składnik migotania okazał się większy niż `roughness` i krok kratki hasza razem.
 
 ---
 
