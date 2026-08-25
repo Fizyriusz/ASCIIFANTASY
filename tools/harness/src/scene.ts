@@ -19,7 +19,7 @@
  * wyglądają na przypadkowe — bo są konkretne.
  */
 
-import { Screen, compileMaterials, createRenderContext } from '@rpg/core';
+import { Screen, addSource, clearSources, compileMaterials, createRenderContext } from '@rpg/core';
 import type { Camera, Material, RenderContext } from '@rpg/core';
 import { neonPack, NeonMat, wildPack } from '@rpg/content';
 import {
@@ -222,6 +222,138 @@ export function wildScene(view: keyof typeof WILD_VIEWS): { store: ChunkStore; c
   const store = new ChunkStore(WILD_SEED, wildPack, 3);
   store.loadRing(camera);
   return { store, camera };
+}
+
+/* ------------------------------------------------------------------ *
+ * M2 — podziemia, wnętrza i światło
+ * ------------------------------------------------------------------ */
+
+/**
+ * Kontekst nocny i podziemny: mnożnik pory dnia zero. Nie jest to przesada — cała
+ * mechanika eksploracji lochu polega na tym, że bez pochodni nie widać nic,
+ * a „odrobina światła dla wygody" kasuje ją w całości.
+ */
+export function darkContext(): RenderContext {
+  const ctx = context(wildMaterials, 200, 220);
+  ctx.light.daylight = wildPack.light.daylightNight;
+  return ctx;
+}
+
+/** Zapala pochodnię gracza w pozycji kamery. Migotanie ustawione na spokojny płomień. */
+export function lightTorch(ctx: RenderContext, camera: Camera): void {
+  ctx.light.torchX = camera.x * CELL_METERS;
+  ctx.light.torchY = camera.y * CELL_METERS;
+  ctx.light.torchZ = camera.eyeZ;
+  ctx.light.torchRadius = wildPack.light.torchRadius;
+  ctx.light.torchPower = wildPack.light.torchPower;
+  ctx.light.torchFlicker = 1;
+}
+
+/**
+ * Sceny podziemne. Współrzędne pochodzą z lochu w węźle (-1,-1) seeda 4242 —
+ * wypisanego przez sondę, nie wymyślonego: łańcuch schodzi z 18,4 m przy wejściu
+ * na -2,6 m na czwartym poziomie.
+ *
+ * Wysokości podłogi tu nie ma celowo. Bierzemy ją ze spanu zerowego komórki,
+ * bo bieg schodów zmienia poziom co komórkę, a wpisana ręcznie liczba raz już
+ * ustawiła kamerę w litej skale.
+ */
+export const DUNGEON_VIEWS = {
+  /** bieg schodów pierwszego poziomu, kamera patrzy w dół biegu */
+  corridor: { x: -157.5, y: -441.5, yaw: Math.PI, pitch: -0.12 },
+  /** największa komora lochu, na dnie — jedyna scena podziemna ze światłem statycznym */
+  room: { x: -222.5, y: -443.5, yaw: 0, pitch: 0 },
+  /** długi prosty korytarz: widać, gdzie kończy się zasięg pochodni */
+  torch: { x: -155.5, y: -440.5, yaw: -Math.PI / 2, pitch: -0.1 },
+  /**
+   * Wejście oglądane **od środka**: ciemny tunel dookoła, jasne wcięcie przed
+   * nami. Od zewnątrz ten sam kadr się nie udaje — rampa wchodzi w zbocze
+   * szybciej, niż opada strop, więc z dziesięciu metrów widać już tylko skarpę.
+   */
+  mouth: { x: -170.5, y: -426.5, yaw: Math.PI, pitch: 0 },
+} as const;
+
+/**
+ * Loch albo otwór jaskini. `sources` wstawia żagwie do zestawu świateł —
+ * po jednej na róg komory, żeby było widać, że oświetlenie dynamiczne sumuje się
+ * z kilku źródeł, a nie tylko z pochodni.
+ */
+export function dungeonScene(
+  view: keyof typeof DUNGEON_VIEWS,
+  opts?: { torch?: boolean; sources?: boolean },
+): { store: ChunkStore; camera: Camera; ctx: RenderContext } {
+  const v = DUNGEON_VIEWS[view];
+  const store = new ChunkStore(WILD_SEED, wildPack, 2);
+  store.loadRing({ x: v.x, y: v.y });
+  const cx = Math.floor(v.x);
+  const cy = Math.floor(v.y);
+  // podłoga to najniższy span komórki — na schodach i w wcięciu zmienia się
+  // co komórkę, więc jedyna wiarygodna wartość jest odczytana, nie wpisana
+  const floor = store.spanTop(cx, cy, 0);
+  const camera: Camera = {
+    x: v.x,
+    y: v.y,
+    eyeZ: floor + 1.7,
+    yaw: v.yaw,
+    pitch: v.pitch,
+    fov: (74 * Math.PI) / 180,
+  };
+  const ctx = darkContext();
+  clearSources(ctx.light);
+  if (opts?.sources === true) {
+    const p = wildPack.light;
+    addSource(ctx.light, (v.x - 2) * CELL_METERS, (v.y - 1) * CELL_METERS, floor + 2, p.sourceRadius, p.sourcePower);
+    addSource(ctx.light, (v.x + 3) * CELL_METERS, (v.y + 2) * CELL_METERS, floor + 2, p.sourceRadius, p.sourcePower);
+  }
+  if (opts?.torch !== false) lightTorch(ctx, camera);
+  return { store, camera, ctx };
+}
+
+/**
+ * Chata: widok przez otwarte drzwi z zewnątrz i widok przez okno od środka.
+ * To są sceny dowodowe maski pokrycia — bez niej za otworem byłaby ściana.
+ */
+export const HUT = { x: -47, y: 138, doorX: -44, windowX: -42, windowY: 139, floorZ: 6.9 } as const;
+
+export function hutScene(view: 'door' | 'window'): {
+  store: ChunkStore;
+  camera: Camera;
+  ctx: RenderContext;
+} {
+  const store = new ChunkStore(WILD_SEED, wildPack, 2);
+  const camera: Camera =
+    view === 'door'
+      ? // trzy komórki przed drzwiami, na wprost otworu
+        {
+          x: HUT.doorX + 0.5,
+          y: HUT.y - 3.5,
+          eyeZ: HUT.floorZ + 1.7,
+          yaw: Math.PI / 2,
+          pitch: 0,
+          fov: (74 * Math.PI) / 180,
+        }
+      : // w środku izby, twarzą do okna w ścianie wschodniej
+        {
+          x: HUT.x + 2.5,
+          y: HUT.windowY + 0.5,
+          eyeZ: HUT.floorZ + 1.7,
+          yaw: 0,
+          pitch: 0,
+          fov: (74 * Math.PI) / 180,
+        };
+  store.loadRing(camera);
+  const ctx = wildContext();
+  clearSources(ctx.light);
+  return { store, camera, ctx };
+}
+
+/** Pustkowie nocą: ten sam teren co `wild-hills`, ale bez światła dziennego. */
+export function nightScene(): { store: ChunkStore; camera: Camera; ctx: RenderContext } {
+  const s = wildScene('hills');
+  const ctx = darkContext();
+  clearSources(ctx.light);
+  lightTorch(ctx, s.camera);
+  return { store: s.store, camera: s.camera, ctx };
 }
 
 /** Miasto z odłożonej paczki — dowód, że setting da się wymienić bez ruszania kodu. */

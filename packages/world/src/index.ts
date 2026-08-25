@@ -20,4 +20,18 @@ export type { BiomeId } from './biome.js';
 export { propAt } from './props.js';
 export type { PropPick } from './props.js';
 export { Chunk, generateChunk } from './chunk.js';
+export {
+  dungeonAt,
+  dungeonPoiAt,
+  dungeonsNear,
+  dungeonVoidsAt,
+  dungeonMouthAt,
+  dungeonRockBase,
+  mouthFloor,
+  bedrockUnder,
+  clearDungeonCache,
+} from './dungeon.js';
+export type { DungeonGraph, DungeonRoom, DungeonCorridor, DungeonVoid } from './dungeon.js';
+export { structureAt, structuresNear, structureAtCell, StructurePart } from './structure.js';
+export type { Structure, StructureHit } from './structure.js';
 export { ChunkStore } from './streaming.js';

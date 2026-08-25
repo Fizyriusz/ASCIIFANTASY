@@ -5,6 +5,7 @@ import {
   computeMetrics,
   createRenderContext,
   renderWorld,
+  torchFlicker,
   pack15,
   DEFAULT_TARGET_COLS,
 } from '@rpg/core';
@@ -59,6 +60,15 @@ const RUN_SPEED = 13;
 const MOUSE_SENS = 0.0022;
 const PITCH_LIMIT = 1.1;
 
+/**
+ * Doba w sekundach. Osiem minut, bo doba jest tu **oświetleniem, nie zegarem
+ * świata** — harmonogramy NPC przyjdą w M5 i wtedy dostaną własny czas. Do
+ * sprawdzenia, czy noc działa, nikt nie będzie czekał dwudziestu minut.
+ */
+const DAY_SECONDS = 480;
+/** ułamek doby, od którego zaczynamy: poranek, żeby pierwsze wrażenie było widoczne */
+const START_HOUR = 0.3;
+
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d', { alpha: false });
 if (!ctx) throw new Error('Brak kontekstu 2D');
@@ -83,6 +93,8 @@ const render = createRenderContext(compileMaterials(wildPack.materials), {
   fogDist: 220,
   ambient: 0.3,
 });
+render.light.torchRadius = wildPack.light.torchRadius;
+render.light.torchPower = wildPack.light.torchPower;
 
 const cam: Camera = {
   x: START_X,
@@ -102,6 +114,9 @@ world.loadRing(cam);
 cam.eyeZ = world.spanTop(Math.floor(cam.x), Math.floor(cam.y), 0) + PLAYER_EYE;
 /** wysokość, do której oko dąży; `cam.eyeZ` goni ją płynnie w `frame` */
 let eyeTarget = cam.eyeZ;
+/** 0..1 — pozycja w dobie; steruje mnożnikiem światła dziennego */
+let dayPhase = START_HOUR;
+let torchOn = true;
 
 function measure(fontPx: number, fontStack: string): number {
   if (!ctx) return fontPx * 0.6;
@@ -109,8 +124,20 @@ function measure(fontPx: number, fontStack: string): number {
   return ctx.measureText('M').width;
 }
 
+/**
+ * Rozmiar, na który policzone są aktualne metryki. Pilnujemy go **co klatkę**,
+ * a nie tylko przy zdarzeniu `resize`: strona otwarta w ukrytej karcie albo
+ * w zwiniętym panelu ma `clientWidth` równe zeru, bufor zostaje 1×1 i po
+ * pokazaniu okna nic już go nie przelicza — ekran zostaje czarny, mimo że
+ * pętla chodzi. Porównanie dwóch liczb na klatkę jest tańsze niż ta pułapka.
+ */
+let sizedW = 0;
+let sizedH = 0;
+
 function resize(): void {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  sizedW = canvas.clientWidth;
+  sizedH = canvas.clientHeight;
   const w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
   const h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
   canvas.width = w;
@@ -128,6 +155,9 @@ const keys: Record<string, boolean> = Object.create(null) as Record<string, bool
 
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
+  if (e.code === 'KeyF') torchOn = !torchOn;
+  // skok o pół doby: jedyny sposób zobaczyć noc bez czekania czterech minut
+  if (e.code === 'KeyN') dayPhase = (dayPhase + 0.5) % 1;
   if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'Space') e.preventDefault();
 });
 window.addEventListener('keyup', (e) => {
@@ -163,6 +193,18 @@ function tryMove(nx: number, ny: number): void {
   cam.x = nx;
   cam.y = ny;
   eyeTarget = surf + PLAYER_EYE;
+}
+
+/**
+ * Mnożnik światła dziennego z pozycji w dobie. Dzień trwa mniej więcej połowę
+ * doby, świt i zmierzch są krótkie — liniowe zbocza wystarczą, bo różnicy
+ * między krzywą a łamaną i tak nie widać na rampie piętnastu poziomów.
+ */
+function daylightAt(phase: number): number {
+  if (phase < 0.2 || phase > 0.8) return 0; // noc
+  if (phase < 0.3) return (phase - 0.2) * 10; // świt
+  if (phase > 0.7) return (0.8 - phase) * 10; // zmierzch
+  return 1;
 }
 
 function step(dt: number): void {
@@ -201,6 +243,7 @@ let prevT = 0;
 let fps = 0;
 
 function frame(t: number): void {
+  if (canvas.clientWidth !== sizedW || canvas.clientHeight !== sizedH) resize();
   const dt = prevT === 0 ? 0 : Math.min(0.05, (t - prevT) * 0.001);
   prevT = t;
   if (dt > 0) fps += (1 / dt - fps) * 0.1;
@@ -210,6 +253,17 @@ function frame(t: number): void {
     const k = dt * EYE_SMOOTH;
     cam.eyeZ += (eyeTarget - cam.eyeZ) * (k > 1 ? 1 : k);
   }
+
+  dayPhase = (dayPhase + dt / DAY_SECONDS) % 1;
+  render.light.daylight = daylightAt(dayPhase);
+  // Pochodnia jedzie z okiem, a nie z nogami — inaczej cień własnej sylwetki
+  // wychodziłby na ścianę przed graczem. Migotanie liczymy z zegara klatki,
+  // więc jest gładkie niezależnie od fps.
+  render.light.torchX = cam.x * CELL_METERS;
+  render.light.torchY = cam.y * CELL_METERS;
+  render.light.torchZ = cam.eyeZ;
+  render.light.torchPower = torchOn ? wildPack.light.torchPower : 0;
+  render.light.torchFlicker = torchFlicker(t * 0.001);
   // najwyżej jeden chunk na klatkę — pusta krawędź świata jest mniej dotkliwa
   // niż zacinka, a przy prędkości marszu i tak nie zdążymy jej zobaczyć
   world.update(cam);
@@ -238,7 +292,20 @@ function drawHud(): void {
     `x ${cam.x.toFixed(0)}  y ${cam.y.toFixed(0)}  ${(cam.eyeZ - PLAYER_EYE).toFixed(1)} m n.p.m.  ${biome?.id ?? '?'}`,
     HUD_DIM,
   );
-  screen.text(1, screen.rows - 1, 'WASD + mysz (klik = pointer lock), Shift = bieg', HUD_DIM);
+  const hour = Math.floor(dayPhase * 24);
+  const minute = Math.floor((dayPhase * 24 - hour) * 60);
+  screen.text(
+    1,
+    2,
+    `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}  pochodnia ${torchOn ? 'tak' : 'nie'}`,
+    HUD_DIM,
+  );
+  screen.text(
+    1,
+    screen.rows - 1,
+    'WASD + mysz (klik = pointer lock), Shift = bieg, F = pochodnia, N = pół doby',
+    HUD_DIM,
+  );
 }
 
 resize();

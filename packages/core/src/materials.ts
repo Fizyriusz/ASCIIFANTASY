@@ -46,6 +46,8 @@ export interface Material {
   roughness: number;
   /** 0..1 — ile powierzchnia świeci własnym światłem, niezależnie od oświetlenia */
   emissive: number;
+  /** czy przez materiał widać dalszą geometrię — otwór drzwiowy, okno */
+  transparent: boolean;
 }
 
 /**
@@ -99,6 +101,7 @@ export function compileMaterials(defs: readonly MaterialDef[]): Material[] {
       b: d.b,
       roughness: d.roughness,
       emissive: d.emissive,
+      transparent: d.transparent === true,
     };
   }
   return out;

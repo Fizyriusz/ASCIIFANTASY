@@ -8,7 +8,14 @@
  * jak awaria monitora.
  */
 
-import type { BiomeDef, ContentPack, MaterialDef, PropDef } from '../../types.js';
+import type {
+  BiomeDef,
+  ContentPack,
+  LightDef,
+  MaterialDef,
+  PropDef,
+  UndergroundDef,
+} from '../../types.js';
 
 export const WildMat = {
   Dirt: 0,
@@ -24,6 +31,16 @@ export const WildMat = {
   Conifer: 10,
   Deadwood: 11,
   Snow: 12,
+  /* --- M2: podziemia i wnętrza --- */
+  Granite: 13,
+  Rubble: 14,
+  Planks: 15,
+  /** otwór drzwiowy: przezroczysty, przechodni */
+  Doorway: 16,
+  /** okno: przezroczyste, nieprzechodnie — różnica jest w kolizji, nie w renderze */
+  Window: 17,
+  /** żagiew: świeci własnym światłem i jest źródłem dla oświetlenia dynamicznego */
+  Torch: 18,
 } as const;
 
 export type WildMat = (typeof WildMat)[keyof typeof WildMat];
@@ -58,7 +75,38 @@ const materials: readonly MaterialDef[] = [
   { id: 'conifer', bright: '^*+', mid: '^*+', dark: ':.', r: 56, g: 92, b: 66, roughness: 0.7, emissive: 0 },
   { id: 'deadwood', bright: '=-|', mid: '-:.', dark: '.', r: 122, g: 106, b: 84, roughness: 0.65, emissive: 0 },
   { id: 'snow', bright: '@8O', mid: '*o+', dark: ':.', r: 226, g: 232, b: 240, roughness: 0.3, emissive: 0 },
+  // Podziemia: granit jest gładszy od skały powierzchniowej, gruz drobniejszy.
+  { id: 'granite', bright: '#%&', mid: '=+*', dark: ':.', r: 104, g: 100, b: 108, roughness: 0.45, emissive: 0 },
+  { id: 'rubble', bright: 'oo%', mid: ':,+', dark: '..', r: 118, g: 112, b: 104, roughness: 0.6, emissive: 0 },
+  { id: 'planks', bright: '==#', mid: '--=', dark: '..', r: 132, g: 104, b: 66, roughness: 0.4, emissive: 0 },
+  // --- MATERIAŁY PRZEZROCZYSTE PACZKI: doorway, window. Tylko te dwa. ---
+  //
+  // Renderer ich nie maluje — rampy są tu wyłącznie po to, żeby tablica materiałów
+  // miała spójny kształt, i nigdy nie trafiają na ekran. Każdy wpis na tej liście
+  // to **koszt renderowania, nie wygląd**: kolumna, która trafi na span takiego
+  // materiału, przechodzi na maskę pokrycia i kosztuje 1,8× kolumny zwykłej.
+  // Dopisanie tu wody albo listowia spowolniłoby każdą scenę z rzeką lub lasem
+  // i nie ruszyłoby żadnego snapshotu, bo obraz byłby identyczny. Zanim dopiszesz
+  // trzeci materiał, sprawdź, czy naprawdę ma być przez niego widać **geometrię
+  // za nim** — półprzezroczystość wizualna to `emissive` i kolor, nie ta flaga.
+  { id: 'doorway', bright: ' ', mid: ' ', dark: ' ', r: 0, g: 0, b: 0, roughness: 0, emissive: 0, transparent: true },
+  { id: 'window', bright: ' ', mid: ' ', dark: ' ', r: 0, g: 0, b: 0, roughness: 0, emissive: 0, transparent: true },
+  { id: 'torch', bright: '*@', mid: '+o', dark: '.', r: 255, g: 208, b: 130, roughness: 0.3, emissive: 1 },
 ];
+
+/**
+ * Światło settingu. `daylightNight` jest **zerem** i to nie jest przeoczenie:
+ * ciemność ma być przeszkodą, a nie efektem. Dodanie tu 0,05 „dla wygody"
+ * kasuje całą mechanikę eksploracji podziemi.
+ */
+const light: LightDef = {
+  torchRadius: 8,
+  torchPower: 0.95,
+  daylightDay: 1,
+  daylightNight: 0,
+  sourceRadius: 7,
+  sourcePower: 0.85,
+};
 
 export const WildProp = {
   Oak: 0,
@@ -197,10 +245,22 @@ const biomes: readonly BiomeDef[] = [
   },
 ];
 
+const underground: UndergroundDef = {
+  rock: WildMat.Granite,
+  rubble: WildMat.Rubble,
+  wall: WildMat.Planks,
+  floor: WildMat.Planks,
+  doorway: WildMat.Doorway,
+  window: WildMat.Window,
+  torch: WildMat.Torch,
+};
+
 export const wildPack: ContentPack = {
   id: 'wild',
   materials,
   biomes,
   props,
   waterMaterial: WildMat.Water,
+  light,
+  underground,
 };

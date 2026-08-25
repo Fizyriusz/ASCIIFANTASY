@@ -46,6 +46,8 @@
 import type { Screen } from './screen.js';
 import type { Material } from './materials.js';
 import { materialGlyph } from './materials.js';
+import type { LightRig } from './light.js';
+import { createLightRig, lightAt } from './light.js';
 import { shade } from './color.js';
 
 export interface Camera {
@@ -118,6 +120,21 @@ export interface RenderTarget {
  */
 export interface RenderContext {
   materials: readonly Material[];
+  /**
+   * Czy tablica materiałów zawiera **cokolwiek** przezroczystego. Liczone raz
+   * na klatkę, żeby kolumna na otwartym terenie nie przeglądała spanów komórki
+   * w poszukiwaniu otworu, którego w tej paczce nie ma. Dwadzieścia porównań
+   * na klatkę zamiast półtora na komórkę.
+   */
+  hasOpenings: number;
+  /**
+   * Ile kolumn tej klatki poszło ścieżką maski pokrycia. Diagnostyka, nie stan:
+   * maska kosztuje 1,8× kolumny szybkiej ścieżki, a włącza ją **wpis w paczce
+   * contentu** (`MaterialDef.transparent`). Bez tego licznika oznaczenie wody
+   * jako przezroczystej wysłałoby każdą scenę z rzeką na wolną ścieżkę i nikt
+   * by się nie dowiedział. Testy pilnują, żeby w scenach zewnętrznych było zero.
+   */
+  maskedColumns: number;
   /** bufor trafień, którego renderWorld używa dla kolejnych kolumn */
   hits: ColumnHits;
   /** zasięg marszu w komórkach */
@@ -130,6 +147,16 @@ export interface RenderContext {
   fogDist: number;
   /** 0..1 — ile widać w komórce o zerowym świetle statycznym */
   ambient: number;
+  /**
+   * Źródła światła i pochodnia. `ambient` z tego zestawu nadpisuje pole wyżej —
+   * pole zostaje, bo `createRenderContext` przyjmuje je jako opcję.
+   */
+  light: LightRig;
+  /**
+   * Maska pokrycia wierszy, prealokowana na maksymalną wysokość ekranu.
+   * Używana **tylko** w kolumnach z otworem; kolumna bez otworu jej nie dotyka.
+   */
+  coverage: Uint8Array;
   cellW: number;
   cellH: number;
   // --- poniżej: przeliczane przez renderWorld na starcie klatki, renderColumn tylko czyta ---
@@ -161,18 +188,36 @@ export interface RenderOptions {
 /** Sentynel "brak powierzchni" — rzut wypada poza ekranem, więc pasek wychodzi pusty. */
 const NO_SURFACE = 1e6;
 
+/**
+ * Luminancja, poniżej której komórka zostaje **pusta** zamiast dostać najciemniejszy
+ * glif rampy.
+ *
+ * Bez tego progu „w lochu bez światła nie widać nic" jest niewykonalne: rampa ciemna
+ * ma swój glif i przy zerowej luminancji renderer malowałby kropki w idealnej
+ * ciemności. Próg jest celowo bardzo nisko — ma odcinać zero, a nie przygaszać obraz.
+ */
+const LIGHT_CUTOFF = 0.035;
+
 export function createRenderContext(
   materials: readonly Material[],
   opts?: RenderOptions,
 ): RenderContext {
+  const rig = createLightRig();
+  rig.ambient = opts?.ambient ?? 0.25;
   return {
     materials,
+    // domyślnie zachowawczo: `renderWorld` przelicza to na każdej klatce, ale
+    // `renderColumn` wołane samodzielnie nie ma kiedy
+    hasOpenings: 1,
+    maskedColumns: 0,
     hits: createColumnHits(),
     maxDepth: opts?.maxDepth ?? 96,
     maxSteps: opts?.maxSteps ?? 192,
     metersPerCell: opts?.metersPerCell ?? 2,
     fogDist: opts?.fogDist ?? 90,
     ambient: opts?.ambient ?? 0.25,
+    light: rig,
+    coverage: new Uint8Array(256),
     cellW: opts?.cellW ?? 6,
     cellH: opts?.cellH ?? 10,
     kh: 0,
@@ -215,7 +260,19 @@ export function renderWorld(
   ctx.planeX = -ctx.dirY * half;
   ctx.planeY = ctx.dirX * half;
 
+  let openings = 0;
+  for (let i = 0; i < ctx.materials.length; i++) {
+    if (ctx.materials[i]?.transparent === true) {
+      openings = 1;
+      break;
+    }
+  }
+  ctx.hasOpenings = openings;
+  ctx.maskedColumns = 0;
+
   seedFrontiers(target, cam, ctx);
+  // maska musi pomiescic caly ekran; realokacja tylko przy zmianie rozmiaru okna
+  if (ctx.coverage.length < rows) ctx.coverage = new Uint8Array(rows);
 
   for (let col = 0; col < cols; col++) {
     renderColumn(target, cam, screen, col, ctx.hits, ctx);
@@ -269,16 +326,18 @@ export function renderColumn(
   const rows = screen.rows;
   const horizon = ctx.horizon;
   const kv = ctx.kv;
+  const kh = ctx.kh;
   const eyeZ = cam.eyeZ;
   const mpc = ctx.metersPerCell;
   const invMpc = 1 / mpc;
   const fogDist = ctx.fogDist;
-  const ambient = ctx.ambient;
   const materials = ctx.materials;
   const maxDepthM = ctx.maxDepth * mpc;
+  const rig = ctx.light;
+  const cover = ctx.coverage;
 
-  // kierunek promienia: dir + plane * x, celowo nieznormalizowany — dzięki temu
-  // odległość z DDA jest od razu prostopadła i nie ma rybiego oka
+  // kierunek promienia: dir + plane * x, celowo nieznormalizowany — dzieki temu
+  // odleglosc z DDA jest od razu prostopadla i nie ma rybiego oka
   const camPlane = (2 * (col + 0.5)) / cols - 1;
   let rdx = ctx.dirX + ctx.planeX * camPlane;
   let rdy = ctx.dirY + ctx.planeY * camPlane;
@@ -315,6 +374,13 @@ export function renderColumn(
   let ceilZ = ctx.ceilZ0;
   let ceilMat = ctx.ceilMat0;
   let blocked = 0;
+  /**
+   * Tryb maski. Kolumna wchodzi w niego dopiero, gdy trafi na span z materialem
+   * przezroczystym — czyli na otwor drzwiowy albo okno. Dopoki tego nie ma,
+   * dziala szybka sciezka dwoch frontow i nie placi ani jednego odczytu maski.
+   */
+  let masked = 0;
+  let coveredCount = 0;
 
   let side = 0;
   let dist = 0;
@@ -322,13 +388,24 @@ export function renderColumn(
   let invDistM = 0;
   let fog = 0;
   let face = 1;
-  let lightF = 1;
+  let rawLight = 0;
+  let surfaceLight = 0;
+  let underLight = 0;
+  let faceAccess = 0;
+  let capAccess = 0;
+  /** dostęp do nieba komórki z poprzedniego kroku DDA — patrz pętla niżej */
+  let carryAccess = 0;
+  let prevUnder = 0;
+  let pn = 0;
+  let roofed = 0;
   let uWorld = 0;
   let uFrac = 0;
   let uMetres = 0;
   let wallAxisM = 0;
   let wallFoot = 0;
   let capFoot = 0;
+  let hitXm = 0;
+  let hitYm = 0;
   let n = 0;
   let i = 0;
   let top = 0;
@@ -346,6 +423,7 @@ export function renderColumn(
   let capZ = 0;
   let wallLimitZ = 0;
   let capMat = 0;
+  let capLight = 0;
   let matId = 0;
   let k = 0;
   let den = 0;
@@ -353,10 +431,25 @@ export function renderColumn(
   let dCapCells = 0;
   let zRow = 0;
   let lum = 0;
+  let capXm = 0;
+  let capYm = 0;
   let wallM: Material | undefined;
   let capM: Material | undefined;
+  let probe: Material | undefined;
 
   hits.count = 0;
+
+  // Pierwszy krok nie ma poprzedniej iteracji, więc jedyny lookup „wstecz"
+  // w całym marszu dotyczy komórki kamery.
+  carryAccess = 15;
+  pn = target.spanCount(mapX, mapY);
+  if (pn > 0) {
+    prevUnder = target.light(mapX, mapY);
+    prevUnder = prevUnder >> 4 === 0 ? 15 : prevUnder & 15;
+    if (prevUnder < 15 && eyeZ < target.spanTop(mapX, mapY, pn - 1) - 0.5) {
+      carryAccess = prevUnder;
+    }
+  }
 
   for (let step = 0; step < ctx.maxSteps; step++) {
     if (sdx < sdy) {
@@ -379,55 +472,132 @@ export function renderColumn(
       invDistM = 1 / distM;
       fog = Math.exp(-distM / fogDist);
       face = side === 1 ? 0.7 : 1;
-      lightF = ambient + (1 - ambient) * (target.light(mapX, mapY) * 0.0666666666666667);
-      // wallU z dokładnej pozycji trafienia, nigdy z zaokrąglonej odległości —
-      // inaczej tekstura fasady skacze o komórkę przy każdym kroku gracza
+      rawLight = target.light(mapX, mapY);
+      // starsza połówka bajtu to światło powierzchni, młodsza — podziemne.
+      // Zwykła wartość 0..15 ma starszą połówkę zerową, więc `|| ` sprowadza
+      // ją z powrotem do tej samej liczby i stare siatki działają bez zmian.
+      // Bajt światła ma dwie połówki: starsza to jasność powierzchni, młodsza —
+      // dostęp do nieba. Siatka sprzed M2 (`SpanGrid` paczki neon) trzyma czystą
+      // wartość 0..15, więc starsza połówka wychodzi zerem: czytamy ją wtedy jako
+      // jasność, a dostęp do nieba jako pełny. Dzięki temu M0 renderuje się bajt
+      // w bajt tak samo.
+      surfaceLight = rawLight >> 4;
+      if (surfaceLight === 0) {
+        surfaceLight = rawLight & 15;
+        underLight = 15;
+      } else {
+        underLight = rawLight & 15;
+      }
+      // Lico ściany oświetla **pustka, która na nie patrzy**, a nie bryła, do której
+      // należy. Ściana korytarza to bok litej skały sięgającej nieba: gdyby liczyło
+      // się jej własne światło, korytarz szesnaście metrów pod ziemią byłby jasny
+      // jak łąka. Promień przyszedł z pustki korytarza i to jej przepustowość
+      // ogranicza światło lica.
+      //
+      // Wartość jest **niesiona z poprzedniego kroku**, a nie czytana ponownie:
+      // DDA odwiedza komórki po kolei, więc „komórka poprzednia" to ta z poprzedniej
+      // iteracji i jej bajt światła był już pobrany. Wersja czytająca ją drugi raz
+      // kosztowała trzy zapytania do świata na komórkę i 13–28% czasu klatki
+      // w scenach, w których żadnej pustki nie ma.
+      faceAccess = carryAccess;
+      // wallU z dokladnej pozycji trafienia, nigdy z zaokraglonej odleglosci —
+      // inaczej tekstura fasady skacze o komorke przy kazdym kroku gracza
       uWorld = side === 0 ? cam.y + dist * rdy : cam.x + dist * rdx;
       uFrac = uWorld - Math.floor(uWorld);
       uMetres = uWorld * mpc;
       wallAxisM = (side === 0 ? mapX : mapY) * mpc;
-      // rzutowany rozmiar komórki na ścianie: pion rozciąga się mocniej niż poziom,
-      // bo kv < kh, więc to on decyduje o aliasingu
+      // rzutowany rozmiar komorki na scianie: pion rozciaga sie mocniej niz poziom,
+      // bo kv < kh, wiec to on decyduje o aliasingu
       wallFoot = distM / kv;
+      hitXm = (cam.x + dist * rdx) * mpc;
+      hitYm = (cam.y + dist * rdy) * mpc;
 
-      // --- front dolny: wszystko, na co patrzymy z góry (teren, bruk, fasady) ---
+      // Otwor w kolumnie: gdy w komorce jest span przezroczysty, dwa fronty
+      // przestaja wystarczac, bo geometria za otworem trafia w SRODEK obrazu.
+      // Przechodzimy na maske i zasiewamy ja tym, co fronty juz zamalowaly.
+      if (masked === 0 && ctx.hasOpenings === 1) {
+        for (i = 0; i < n; i++) {
+          probe = materials[target.spanMaterial(mapX, mapY, i)];
+          if (probe !== undefined && probe.transparent) {
+            for (row = 0; row < rows; row++) {
+              if (row <= hiRow || row >= loRow) {
+                cover[row] = 1;
+                coveredCount++;
+              } else {
+                cover[row] = 0;
+              }
+            }
+            masked = 1;
+            ctx.maskedColumns++;
+            break;
+          }
+        }
+      }
+
+      // --- front dolny: wszystko, na co patrzymy z gory (teren, bruk, fasady) ---
       for (i = n - 1; i >= 0; i--) {
         bottom = target.spanBottom(mapX, mapY, i);
-        if (bottom >= eyeZ) continue; // sufit — druga pętla
+        if (bottom >= eyeZ) continue; // sufit — druga petla
+        matId = target.spanMaterial(mapX, mapY, i);
+        wallM = materials[matId];
+        // span przezroczysty nie maluje sie i nie przesuwa frontu — jest dziura
+        if (wallM !== undefined && wallM.transparent) continue;
         top = target.spanTop(mapX, mapY, i);
+        // Powierzchnia jest zadaszona, gdy nad nia jest span oddzielony pustka.
+        // Pien drzewa stoi na gruncie bez przerwy, wiec lasu to nie dotyczy;
+        // strop komory i dach chaty odstaja od podlogi o wysokosc wnetrza.
+        roofed = i + 1 < n && target.spanBottom(mapX, mapY, i + 1) - top > 0.5 ? 1 : 0;
+        // czapka pod stropem widzi niebo tylko tyle, ile przepuszcza pustka
+        // nad nią; poza stropem — całe
+        capAccess = roofed === 1 ? underLight : 15;
         rowSurf = horizon - (top - eyeZ) * kv * invDistM;
         rFirst = Math.ceil(rowSurf - 0.5);
-        if (rFirst >= loRow) continue; // zasłonięty w całości
+        if (masked === 0 && rFirst >= loRow) continue; // zasloniety w calosci
 
-        r0 = rFirst > hiRow + 1 ? rFirst : hiRow + 1;
-        if (r0 < 0) r0 = 0;
-        r1 = loRow - 1;
-        if (r1 > rows - 1) r1 = rows - 1;
+        if (masked === 1) {
+          r0 = rFirst < 0 ? 0 : rFirst;
+          r1 = rows - 1;
+        } else {
+          r0 = rFirst > hiRow + 1 ? rFirst : hiRow + 1;
+          if (r0 < 0) r0 = 0;
+          r1 = loRow - 1;
+          if (r1 > rows - 1) r1 = rows - 1;
+        }
 
         if (r0 <= r1) {
-          // niższa z dwóch powierzchni wyznacza czapkę, różnica między nimi — ścianę
+          // nizsza z dwoch powierzchni wyznacza czapke, roznica miedzy nimi — sciane
           if (floorZ < top) {
+            // czapka jest przedluzeniem POPRZEDNIEJ powierzchni, wiec nalezy do
+            // pustki, przez ktora idzie promien — swiatlo bierzemy stamtad, tak
+            // samo jak dla lica sciany. Inaczej podloga korytarza tuz przed lita
+            // skala rozjasnia sie do wartosci powierzchni.
             capZ = floorZ;
             capMat = floorMat;
+            capLight = faceAccess;
           } else {
             capZ = top;
             capMat = target.spanCapMaterial(mapX, mapY, i);
+            capLight = capAccess;
           }
-          // ściana kończy się na wyższej z dwóch krawędzi: własnym spodzie spanu
-          // albo poprzedniej powierzchni. Dzięki temu przęsło oglądane z góry ma
-          // lico grubości przęsła, a nie ścianę ciągnącą się do ziemi
+          // sciana konczy sie na wyzszej z dwoch krawedzi: wlasnym spodzie spanu
+          // albo poprzedniej powierzchni. Dzieki temu przeslo ogladane z gory ma
+          // lico grubosci przesla, a nie sciane ciagnaca sie do ziemi
           wallLimitZ = capZ > bottom ? capZ : bottom;
           rowCap = horizon - (wallLimitZ - eyeZ) * kv * invDistM;
           wallEnd = Math.ceil(rowCap - 0.5) - 1;
           if (wallEnd > r1) wallEnd = r1;
 
-          matId = target.spanMaterial(mapX, mapY, i);
-          wallM = materials[matId];
           if (wallM !== undefined) {
             for (row = r0; row <= wallEnd; row++) {
+              if (masked === 1) {
+                if (cover[row] === 1) continue;
+                cover[row] = 1;
+                coveredCount++;
+              }
               zRow = eyeZ + (horizon - (row + 0.5)) * distM / kv;
-              lum = lightF * fog * face;
+              lum = lightAt(rig, hitXm, hitYm, zRow, surfaceLight, faceAccess) * fog * face;
               if (wallM.emissive > 0) lum += (1 - lum) * wallM.emissive;
+              if (lum < LIGHT_CUTOFF) continue;
               screen.putUnsafe(
                 col,
                 row,
@@ -441,43 +611,44 @@ export function renderColumn(
           if (capM !== undefined && capZ > -NO_SURFACE) {
             wallStart = wallEnd + 1 > r0 ? wallEnd + 1 : r0;
             for (row = wallStart; row <= r1; row++) {
+              if (masked === 1 && cover[row] === 1) continue;
               den = row + 0.5 - horizon;
-              if (den <= 1e-6) continue; // ponad horyzontem czapki nie widać
-              // czapka jest płaszczyzną poziomą: jej wiersz wynika z wysokości
-              // i odległości, a nie z interpolacji między spanami
+              if (den <= 1e-6) continue; // ponad horyzontem czapki nie widac
+              // czapka jest plaszczyzna pozioma: jej wiersz wynika z wysokosci
+              // i odleglosci, a nie z interpolacji miedzy spanami
               dCapM = (eyeZ - capZ) * kv / den;
               if (dCapM <= 0) continue;
-              // wiersze tuż przy horyzoncie mają odległość dążącą do nieskończoności;
-              // przycinamy ją do zasięgu zamiast pomijać wiersz, bo pominięty wiersz
-              // to dziura w obrazie, a przycięty to po prostu maksymalna mgła
+              // wiersze tuz przy horyzoncie maja odleglosc dazaca do nieskonczonosci;
+              // przycinamy ja do zasiegu zamiast pomijac wiersz, bo pominiety wiersz
+              // to dziura w obrazie, a przyciety to po prostu maksymalna mgla
               if (dCapM > maxDepthM) dCapM = maxDepthM;
+              if (masked === 1) {
+                cover[row] = 1;
+                coveredCount++;
+              }
               dCapCells = dCapM * invMpc;
-              lum = lightF * Math.exp(-dCapM / fogDist);
+              capXm = (cam.x + rdx * dCapCells) * mpc;
+              capYm = (cam.y + rdy * dCapCells) * mpc;
+              lum = lightAt(rig, capXm, capYm, capZ, surfaceLight, capLight) * Math.exp(-dCapM / fogDist);
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
-              // czapka jest pozioma, więc w głąb rozciąga się dużo mocniej niż
-              // w poprzek: przy horyzoncie jeden wiersz to dziesiątki metrów
+              if (lum < LIGHT_CUTOFF) continue;
+              // czapka jest pozioma, wiec w glab rozciaga sie duzo mocniej niz
+              // w poprzek: przy horyzoncie jeden wiersz to dziesiatki metrow
               capFoot = dCapM / den;
-              if (dCapM / ctx.kh > capFoot) capFoot = dCapM / ctx.kh;
+              if (dCapM / kh > capFoot) capFoot = dCapM / kh;
               screen.putUnsafe(
                 col,
                 row,
-                materialGlyph(
-                  capM,
-                  lum,
-                  (cam.x + rdx * dCapCells) * mpc,
-                  (cam.y + rdy * dCapCells) * mpc,
-                  capZ,
-                  capFoot,
-                ),
+                materialGlyph(capM, lum, capXm, capYm, capZ, capFoot),
                 shade(capM.r, capM.g, capM.b, lum),
               );
             }
           }
         }
 
-        // front i stan powierzchni aktualizujemy PO malowaniu — odwrotna kolejność
-        // zjada wiersz na styku brył i widać to jako szczelinę
-        loRow = rFirst;
+        // front i stan powierzchni aktualizujemy PO malowaniu — odwrotna kolejnosc
+        // zjada wiersz na styku bryl i widac to jako szczeline
+        if (rFirst < loRow) loRow = rFirst;
         rowOther = horizon - (bottom - eyeZ) * kv * invDistM;
         k = hits.count;
         if (k < MAX_HITS) {
@@ -495,38 +666,52 @@ export function renderColumn(
         floorZ = top;
         floorMat = target.spanCapMaterial(mapX, mapY, i);
         if (top > eyeZ) {
-          // bryła przecina poziom oka — za nią nie widać już nic
+          // bryla przecina poziom oka — w szybkiej sciezce za nia nie widac nic.
+          // W trybie maski to nieprawda: obok bryly moze byc otwarte przejscie,
+          // wiec o koncu kolumny decyduje wylacznie zapelnienie maski.
           blocked = 1;
           break;
         }
       }
 
-      // --- front górny: sufity i spody mostów, lustrzane odbicie pętli wyżej ---
+      // --- front gorny: sufity i spody mostow, lustrzane odbicie petli wyzej ---
       for (i = 0; i < n; i++) {
         bottom = target.spanBottom(mapX, mapY, i);
         if (bottom < eyeZ) continue;
+        matId = target.spanMaterial(mapX, mapY, i);
+        wallM = materials[matId];
+        if (wallM !== undefined && wallM.transparent) continue;
         top = target.spanTop(mapX, mapY, i);
+        // spod stropu widzi sie wylacznie od srodka, wiec liczy sie dostep do nieba
+        // pustki, z ktorej promien przyszedl — dokladnie jak przy licach scian
+        capAccess = faceAccess;
         rowSurf = horizon - (bottom - eyeZ) * kv * invDistM;
         rLast = Math.ceil(rowSurf - 0.5) - 1;
-        if (rLast <= hiRow) continue; // zasłonięty przez bliższą geometrię nad okiem
+        if (masked === 0 && rLast <= hiRow) continue; // zasloniety nad okiem
 
-        r0 = hiRow + 1;
-        if (r0 < 0) r0 = 0;
-        r1 = rLast > rows - 1 ? rows - 1 : rLast;
-        if (r1 > loRow - 1) r1 = loRow - 1;
+        if (masked === 1) {
+          r0 = 0;
+          r1 = rLast > rows - 1 ? rows - 1 : rLast;
+        } else {
+          r0 = hiRow + 1;
+          if (r0 < 0) r0 = 0;
+          r1 = rLast > rows - 1 ? rows - 1 : rLast;
+          if (r1 > loRow - 1) r1 = loRow - 1;
+        }
 
         if (r0 <= r1) {
-          // lustro reguły z dołu: widoczna jest *wyższa* z dwóch powierzchni
+          // lustro reguly z dolu: widoczna jest *wyzsza* z dwoch powierzchni
           if (ceilZ > bottom) {
             capZ = ceilZ;
             capMat = ceilMat;
           } else {
             capZ = bottom;
-            capMat = target.spanMaterial(mapX, mapY, i);
+            capMat = matId;
           }
-          // lustro reguły z dołu: ściana zaczyna się na niższej z dwóch krawędzi —
-          // własnym szczycie spanu albo poprzednim suficie. Bez ograniczenia
-          // własnym szczytem pierwszy span nad okiem zamalowuje całe niebo
+          capLight = capAccess;
+          // lustro reguly z dolu: sciana zaczyna sie na nizszej z dwoch krawedzi —
+          // wlasnym szczycie spanu albo poprzednim suficie. Bez ograniczenia
+          // wlasnym szczytem pierwszy span nad okiem zamalowuje cale niebo
           wallLimitZ = capZ < top ? capZ : top;
           rowCap = horizon - (wallLimitZ - eyeZ) * kv * invDistM;
           wallStart = Math.ceil(rowCap - 0.5);
@@ -536,39 +721,44 @@ export function renderColumn(
           if (capM !== undefined && capZ < NO_SURFACE) {
             wallEnd = wallStart - 1 < r1 ? wallStart - 1 : r1;
             for (row = r0; row <= wallEnd; row++) {
+              if (masked === 1 && cover[row] === 1) continue;
               den = horizon - (row + 0.5);
               if (den <= 1e-6) continue;
               dCapM = (capZ - eyeZ) * kv / den;
               if (dCapM <= 0) continue;
               if (dCapM > maxDepthM) dCapM = maxDepthM;
+              if (masked === 1) {
+                cover[row] = 1;
+                coveredCount++;
+              }
               dCapCells = dCapM * invMpc;
-              lum = lightF * Math.exp(-dCapM / fogDist);
+              capXm = (cam.x + rdx * dCapCells) * mpc;
+              capYm = (cam.y + rdy * dCapCells) * mpc;
+              lum = lightAt(rig, capXm, capYm, capZ, surfaceLight, capLight) * Math.exp(-dCapM / fogDist);
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
+              if (lum < LIGHT_CUTOFF) continue;
               capFoot = dCapM / den;
-              if (dCapM / ctx.kh > capFoot) capFoot = dCapM / ctx.kh;
+              if (dCapM / kh > capFoot) capFoot = dCapM / kh;
               screen.putUnsafe(
                 col,
                 row,
-                materialGlyph(
-                  capM,
-                  lum,
-                  (cam.x + rdx * dCapCells) * mpc,
-                  (cam.y + rdy * dCapCells) * mpc,
-                  capZ,
-                  capFoot,
-                ),
+                materialGlyph(capM, lum, capXm, capYm, capZ, capFoot),
                 shade(capM.r, capM.g, capM.b, lum),
               );
             }
           }
 
-          matId = target.spanMaterial(mapX, mapY, i);
-          wallM = materials[matId];
           if (wallM !== undefined) {
             for (row = wallStart; row <= r1; row++) {
+              if (masked === 1) {
+                if (cover[row] === 1) continue;
+                cover[row] = 1;
+                coveredCount++;
+              }
               zRow = eyeZ + (horizon - (row + 0.5)) * distM / kv;
-              lum = lightF * fog * face;
+              lum = lightAt(rig, hitXm, hitYm, zRow, surfaceLight, faceAccess) * fog * face;
               if (wallM.emissive > 0) lum += (1 - lum) * wallM.emissive;
+              if (lum < LIGHT_CUTOFF) continue;
               screen.putUnsafe(
                 col,
                 row,
@@ -579,7 +769,7 @@ export function renderColumn(
           }
         }
 
-        hiRow = rLast;
+        if (rLast > hiRow) hiRow = rLast;
         rowOther = horizon - (top - eyeZ) * kv * invDistM;
         k = hits.count;
         if (k < MAX_HITS) {
@@ -595,11 +785,33 @@ export function renderColumn(
           hits.count = k + 1;
         }
         ceilZ = bottom;
-        ceilMat = target.spanMaterial(mapX, mapY, i);
+        ceilMat = matId;
       }
+
+      // Komórka, przez którą właśnie przeszliśmy, jest komórką poprzednią dla
+      // następnego kroku.
+      //
+      // Ograniczenie dostępu do nieba działa wyłącznie, gdy oko jest **pod stropem**
+      // tej komórki. Bajt światła opisuje całą kolumnę jedną liczbą (§3.1), więc
+      // stojąc na łące nad lochem czytalibyśmy zero z korytarza pięć metrów niżej
+      // i cały widok gasłby bez powodu. Próg 0,5 m odsiewa własną powierzchnię.
+      //
+      // Sprawdzenie stropu robimy dopiero, gdy komórka w ogóle ma pustkę
+      // (`underLight < 15`). Na otwartym terenie ta gałąź nie wchodzi ani razu
+      // i przeniesienie światła nie kosztuje żadnego dodatkowego zapytania.
+      carryAccess = 15;
+      if (underLight < 15 && eyeZ < target.spanTop(mapX, mapY, n - 1) - 0.5) {
+        carryAccess = underLight;
+      }
+    } else {
+      carryAccess = 15; // komórka bez spanów niczego nie ogranicza
     }
 
-    if (blocked === 1) break;
-    if (hiRow + 1 >= loRow) break; // ekran w tej kolumnie zapełniony
+    if (masked === 1) {
+      if (coveredCount >= rows) break; // maska pelna — nic juz nie dojdzie
+    } else {
+      if (blocked === 1) break;
+      if (hiRow + 1 >= loRow) break; // ekran w tej kolumnie zapelniony
+    }
   }
 }

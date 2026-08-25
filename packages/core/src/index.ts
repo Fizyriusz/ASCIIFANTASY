@@ -7,6 +7,8 @@ export type { Blittable, BlitStats } from './blit.js';
 export { computeMetrics, CELL_BUDGET, DEFAULT_TARGET_COLS } from './metrics.js';
 export { RAMP_DENSE, RAMP_SOFT, rampGlyph } from './glyphs.js';
 export { h32 } from './hash.js';
+export { createLightRig, clearSources, addSource, lightAt, torchFlicker } from './light.js';
+export type { LightRig } from './light.js';
 export { compileMaterials, materialGlyph, hashStep, roughnessFalloff, TEXTURE_TUNING } from './materials.js';
 export type { Material } from './materials.js';
 export type { Camera, ColumnHits, RenderTarget, RenderContext, RenderOptions } from './raymarch.js';

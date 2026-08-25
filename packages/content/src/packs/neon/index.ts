@@ -9,7 +9,7 @@
  * `ref-turned`, `ref-pitch-up`, `bridge` i `interior` zależą od nich co do bajta.
  */
 
-import type { ContentPack, MaterialDef } from '../../types.js';
+import type { ContentPack, LightDef, MaterialDef, UndergroundDef } from '../../types.js';
 
 /** Indeksy materiałów paczki. Kolejność jest kontraktem — świat zapisuje ją w spanie. */
 export const NeonMat = {
@@ -27,6 +27,9 @@ export const NeonMat = {
 
 export type NeonMat = (typeof NeonMat)[keyof typeof NeonMat];
 
+// Materiały przezroczyste tej paczki: **żadne**. Miasto z M0 nie ma otworów,
+// więc każda jego kolumna idzie szybką ścieżką dwóch frontów (patrz `transparent`
+// w `types.ts` — to pole kosztuje 1,8× czasu kolumny).
 const materials: readonly MaterialDef[] = [
   { id: 'stone', bright: '#%&', mid: '=+*', dark: ':.', r: 150, g: 150, b: 160, roughness: 0.75, emissive: 0 },
   { id: 'plaster', bright: '8OB', mid: 'o=-', dark: '.,', r: 205, g: 195, b: 170, roughness: 0.55, emissive: 0 },
@@ -45,10 +48,37 @@ const materials: readonly MaterialDef[] = [
  * (`@rpg/world/packs/neon`), a nie z tabel. To celowa asymetria względem `wild`:
  * paczka opisuje setting, a nie sposób jego wytworzenia.
  */
+/** Miasto z M0 świeci własnymi neonami — pochodnia i noc go nie dotyczą. */
+const light: LightDef = {
+  torchRadius: 8,
+  torchPower: 0,
+  daylightDay: 1,
+  daylightNight: 1,
+  sourceRadius: 7,
+  sourcePower: 0,
+};
+
+/**
+ * Miasto z M0 nie ma podziemi ani wnętrz — te indeksy istnieją wyłącznie po to,
+ * żeby paczka miała pełny kształt. Gdyby kiedyś powstał neonowy loch, to jest
+ * miejsce, w którym dostanie własne materiały.
+ */
+const underground: UndergroundDef = {
+  rock: NeonMat.Stone,
+  rubble: NeonMat.Pavement,
+  wall: NeonMat.Plaster,
+  floor: NeonMat.Pavement,
+  doorway: NeonMat.Stone,
+  window: NeonMat.Glass,
+  torch: NeonMat.Lamp,
+};
+
 export const neonPack: ContentPack = {
   id: 'neon',
   materials,
   biomes: [],
   props: [],
   waterMaterial: NeonMat.Water,
+  light,
+  underground,
 };

@@ -27,6 +27,46 @@ export interface MaterialDef {
   roughness: number;
   /** 0..1 — ile powierzchnia świeci własnym światłem */
   emissive: number;
+  /**
+   * Czy przez materiał widać dalszą geometrię. Otwór drzwiowy i okno to spany
+   * z materiałem przezroczystym: renderer ich nie maluje, ale **wie**, że kolumna
+   * ma dziurę w środku, i przełącza się na maskę pokrycia. Bez tego sygnału
+   * musiałby zgadywać z geometrii, a to się nie da odróżnić od zwykłej bryły
+   * z niebem nad nią.
+   *
+   * **To jest pole wydajnościowe, nie wyglądowe.** Każda kolumna, która trafi
+   * na taki span, kosztuje **1,8×** kolumny zwykłej (pomiar w §3.1 architektury):
+   * maska nie umie zakończyć marszu, gdy fronty się zetkną. Ustawienie tej flagi
+   * na materiale pospolitym — wodzie, listowiu, mgle — przenosi na wolną ścieżkę
+   * całe sceny naraz i **nie psuje ani jednego snapshotu**, bo obraz wychodzi ten
+   * sam, tylko wolniej. Dlatego lista materiałów przezroczystych jest wypisana
+   * w każdej paczce, a `tools/harness/src/dungeon.test.ts` pilnuje, żeby sceny
+   * zewnętrzne miały zero kolumn na ścieżce maski.
+   */
+  transparent?: boolean;
+}
+
+/**
+ * Parametry światła settingu. Osobno od materiałów, bo opisują świat, a nie
+ * powierzchnię: jak daleko świeci pochodnia i ile widać bez niej.
+ */
+export interface LightDef {
+  /** metry: zasięg pochodni gracza */
+  torchRadius: number;
+  /** 0..1 — moc pochodni tuż przy źródle */
+  torchPower: number;
+  /**
+   * 0..1 — **mnożnik światła dziennego** w dzień i w nocy.
+   *
+   * Mnożnik, a nie składnik: światło statyczne komórki mówi, ile *dnia* do niej
+   * dociera, więc noc musi je wyzerować, a nie dodać do niego ciemność. Przy
+   * wartości 1 wzór sprowadza się bajt w bajt do wersji sprzed M2.
+   */
+  daylightDay: number;
+  daylightNight: number;
+  /** metry: zasięg pojedynczego źródła statycznego (kaganek, żagiew w lochu) */
+  sourceRadius: number;
+  sourcePower: number;
 }
 
 /** Rodzaj rekwizytu. Decyduje o tym, ile spanów zajmuje i jak jest budowany. */
@@ -60,6 +100,27 @@ export interface BiomeDef {
   light: number;
 }
 
+/**
+ * Materiały konstrukcyjne podziemi i wnętrz. Osobny blok, bo nie należą do
+ * żadnego biomu — loch wygląda tak samo pod łąką i pod borem.
+ */
+export interface UndergroundDef {
+  /** lita skała: ściany komór i strop nad pustką */
+  rock: MaterialIndex;
+  /** gruz: podłoga komory */
+  rubble: MaterialIndex;
+  /** ściana i dach budowli naziemnej */
+  wall: MaterialIndex;
+  /** podłoga wnętrza */
+  floor: MaterialIndex;
+  /** otwór drzwiowy — materiał przezroczysty */
+  doorway: MaterialIndex;
+  /** okno — materiał przezroczysty */
+  window: MaterialIndex;
+  /** żagiew: źródło światła w lochu */
+  torch: MaterialIndex;
+}
+
 export interface ContentPack {
   id: string;
   materials: readonly MaterialDef[];
@@ -70,4 +131,6 @@ export interface ContentPack {
    * w morzu to ta sama substancja, a biom opisuje brzeg, nie ciecz.
    */
   waterMaterial: MaterialIndex;
+  light: LightDef;
+  underground: UndergroundDef;
 }

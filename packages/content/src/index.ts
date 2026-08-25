@@ -3,6 +3,8 @@ export type {
   MaterialDef,
   MaterialIndex,
   BiomeDef,
+  LightDef,
+  UndergroundDef,
   PropDef,
   PropKind,
 } from './types.js';

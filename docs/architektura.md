@@ -27,7 +27,7 @@ na leaderboardy / seed sharing, ale poza MVP.
 
 ```
 ascii-rpg/
-├─ CLAUDE.md                  # kontrakt dla Claude Code (patrz §11)
+├─ CLAUDE.md                  # kontrakt dla Claude Code (patrz §12)
 ├─ package.json               # pnpm workspace
 ├─ apps/
 │  └─ game/                   # Vite app, entry point, pętla, input
@@ -174,6 +174,14 @@ spanu jest równie konieczne: bez niego przęsło mostu oglądane z dołu zamalo
 **Wnętrza**: gracz wewnątrz = zwykły przypadek — nad nim jest span sufitu, więc kolumna
 kończy się na nim. Portale (drzwi) to flaga na spanie, nie osobny system.
 
+**Znane ograniczenie: jedna liczba światła na kolumnę.** Bajt światła należy do
+komórki `(x, y)`, a nie do spanu, więc kolumna z korytarzem pięć metrów pod łąką ma
+jedną wartość dla obu. M2 rozdziela ją na dwie połówki (jasność powierzchni i dostęp
+do nieba) i wybiera połówkę po tym, czy oko jest pod stropem komórki, z której patrzy —
+ale to jest heurystyka na jeden poziom, nie model. Do czasu spłaty obowiązuje zasada
+z §2.1: poziomy nie nakładają się w pionie, a generator lochu odrzuca układy, w których
+by się nakładały. **Termin spłaty i powód są w §10.1 — to jest dług blokujący M4.**
+
 **Znane ograniczenie: otwór w środku kolumny.** Dwa fronty opisują stan kolumny
 dwiema liczbami, więc kolumna jest zawsze *spójna* — zamalowana od dołu i od góry,
 z jedną dziurą pośrodku. To wystarcza dla terenu, budynków, mostów i wnętrz, ale
@@ -182,13 +190,39 @@ bramy przejazdowej, dziury w murze. Przez taki otwór widać dalszą geometrię
 *między* dwoma zamalowanymi obszarami, czego para `(loRow, hiRow)` nie potrafi
 zapisać.
 
-Planowane rozwiązanie, **do decyzji w M2**: szybka ścieżka dwóch frontów zostaje
-domyślną, a kolumna, która trafi na span z flagą `Door` lub `Transparent`,
-przełącza się na maskę pokrycia wierszy (bitmapa `rows` bitów albo lista
-przedziałów). Koszt trzeba **zmierzyć**, nie założyć: interesuje nas czas kolumny
-z maską względem kolumny szybkiej ścieżki i udział takich kolumn w typowej scenie
-miejskiej. Jeśli maska okaże się droższa, niż wynosi zysk wizualny, alternatywą
-jest ograniczenie otworów do osobnego przebiegu tylko dla spanów przezroczystych.
+**Rozstrzygnięte w M2: maska pokrycia, przełączana per kolumna.** Szybka ścieżka
+dwóch frontów została domyślną. Kolumna, która po drodze trafi na span materiału
+przezroczystego, przechodzi na `Uint8Array` o długości `rows`: jeden bajt na wiersz,
+zasiany tym, co fronty zdążyły zamalować, i marsz idzie dalej, aż maska się zapełni.
+
+Przełącznikiem jest **materiał**, nie flaga spanu. `SpanFlags.Door` i `Transparent`
+istnieją i chunk je ustawia, ale renderer ich nie czyta: `RenderTarget` nie ma metody
+`spanFlags`, a dołożenie jej znaczyłoby zmianę interfejsu, `SpanGrid` i wszystkich
+implementacji. `Material.transparent` niesie tę samą informację, jest już w tablicy
+materiałów renderera i kosztuje jedno pobranie pola. Flagi zostają dla kolizji
+i reguł gry — otwarte drzwi i okno różnią się tym, że przez jedno da się przejść,
+a to nie jest sprawa renderera.
+
+Pomiar (`pnpm bench`, ta sama chata i ta sama kamera, raz z materiałem otworu
+przezroczystym, raz nie): 1,348 ms wobec 1,153 ms na klatkę, przy 28 kolumnach
+z maską ze 150. Kolumna szybkiej ścieżki kosztuje w tej scenie **7,7 µs**, kolumna
+z maską **14,6 µs** — czyli **1,9×**. Osiem drzwi w kadrze to kilkanaście kolumn
+i różnica rzędu 0,1 ms; ściana samych okien to już 82 kolumny ze 150 (scena
+`window-portal`) i wtedy koszt maski jest głównym składnikiem klatki.
+
+Ujednolicenia **nie robimy**. Maska nie kończy kolumny, gdy fronty się zetkną —
+musi domalować maskę do końca, a na otwartym terenie fronty spotykają się po dwóch,
+trzech komórkach. Płacenie 80% narzutu na każdej kolumnie pustkowia za przypadek,
+który zdarza się w chatach i bramach, nie ma uzasadnienia.
+
+**Strażnik.** O tym, która ścieżka się włączy, decyduje wpis w paczce contentu
+(`MaterialDef.transparent`), a nie kod renderera. Oznaczenie wody jako przezroczystej
+przeniosłoby każdą scenę z rzeką na wolną ścieżkę i **nie zmieniłoby ani jednego
+piksela**, więc żaden snapshot by tego nie złapał. Dlatego `RenderContext` liczy
+`maskedColumns` na klatkę, a test wymaga zera dla scen `hills`, `forest`, `river`,
+`ridge`, `seam` (plus drugi test pilnuje, że licznik w ogóle rośnie). Renderer sprawdza
+też raz na klatkę, czy w tablicy materiałów jest cokolwiek przezroczystego — jeśli nie,
+kolumny w ogóle nie przeglądają spanów w poszukiwaniu otworu.
 
 ### 3.2 Materiały zamiast tekstur
 
@@ -247,6 +281,35 @@ okoliczności, tylko geometria rzutowania.
 - **dynamiczne**: do 8 najbliższych źródeł liczone analitycznie na piksel-znak
 - **pochodnia gracza**: zawsze, z lekkim migotaniem (sinus + szum)
 - luminancja końcowa steruje wyborem rampy znaku, nie tylko kolorem
+
+**Jak to się składa (M2).** Światła statyczne są dwa i wchodzą w różny sposób:
+
+```
+lum = (ambient + (1 - ambient) * jasnośćPowierzchni/15)   # cień koron, jak w M1
+    * poraDnia                                            # mnożnik, 1 = południe
+    * dostępDoNieba/15                                    # mnożnik, 0 = głęboki loch
+    + Σ źródła(odległość, moc) + pochodnia
+```
+
+Obie pory dnia i dostęp do nieba są **mnożnikami**, nie składnikami, i to nie jest
+kosmetyka. Gdyby noc była składnikiem, znaczyłaby tylko „mniejszy kontrast" —
+pustkowie o północy świeciłoby pełną jasnością trawy, bo jasność powierzchni sama
+z siebie wysyca wzór. Gdyby dostęp do nieba był składnikiem, jaskinia oglądana
+z zewnątrz w południe byłaby jasna, bo `ambient` należy do obserwatora, a nie
+do miejsca. Przy porze dnia = 1 i dostępie = 15 wzór sprowadza się bajt w bajt
+do wersji z M1 i dlatego złote pliki M0 i M1 przetrwały M2 bez zmiany.
+
+**Lico ściany oświetla pustka, która na nie patrzy**, a nie bryła, do której należy.
+Ściana korytarza to bok litej skały sięgającej powierzchni; gdyby liczyło się jej
+własne światło, korytarz szesnaście metrów pod ziemią byłby jasny jak łąka. Renderer
+bierze dostęp do nieba z komórki, **z której promień przyszedł**. Czapka pozioma
+działa tak samo, gdy jest przedłużeniem poprzedniej powierzchni.
+
+**Dostęp do nieba propaguje się wyłącznie przez pustki.** Pierwsza wersja pola
+traktowała litą skałę obok korytarza jak teren pod otwartym niebem i światło
+przeciekało przez ścianę. Komórka bez pustki dostaje wartość pełną, nie zerową —
+zero znaczyłoby „nic tu nie dochodzi", a lita skała po prostu nie ma wnętrza,
+i ta sama liczba jest czytana dla licowania ściany z sąsiedniej komórki.
 
 Konsekwencje rozgrywkowe za darmo: loch bez światła jest naprawdę nieczytelny, skradanie
 = `światło + hałas`, zaklęcie światła jest realnym przedmiotem użytkowym, noc ma znaczenie.
@@ -437,7 +500,51 @@ Po M6: więcej contentu, nie więcej systemów. To jest moment, w którym takie 
 
 ---
 
-## 10. Pułapki (z doświadczenia z tym rendererem)
+## 10. Długi techniczne (z terminem spłaty)
+
+Rzeczy, o których **wiemy**, że są tymczasowe, wraz z milestone'em, przed którym
+muszą zniknąć. Dług bez terminu przestaje być długiem, a staje się architekturą.
+
+### 10.1 Światło należy do komórki, nie do spanu — spłata **przed M4**
+
+Bajt światła jest indeksowany `(x, y)`. M2 rozdzielił go na dwie połówki (jasność
+powierzchni i dostęp do nieba) i wybiera połówkę heurystyką „czy oko jest pod stropem
+komórki, z której patrzy" (§3.1, §3.3). To wystarcza na **jeden** poziom pustki
+w kolumnie i nic więcej.
+
+Blokuje to nie tylko loch pod lochem — to byłby problem contentu, dający się obejść
+regułą generatora (i tak właśnie jest obchodzony: `layoutOk` w `dungeon.ts` odrzuca
+układy z pustkami leżącymi nad sobą). Blokuje **wielopiętrowe wnętrza**, czyli
+karczmę z izbą na dole i pokojami na górze, wieżę ze schodami, ratusz. To jest
+zakres M4 i tam obejścia nie ma: budynek z jednym piętrem jest osobliwością, nie
+settingiem. Parter i piętro tej samej chaty dostają dziś jedną wartość światła,
+więc albo oba są ciemne, albo oba jasne.
+
+Spłata: światło per span (bajt obok `mat`/`capMat` w tablicach chunka) i propagacja
+w pionie między spanami tej samej komórki. Koszt pamięci: jeden bajt na span,
+czyli przy budżecie 1,3 spanu na komórkę mniej niż dzisiejsze `lights`. Zrobić
+**przed** M4, nie „przy okazji" M4 — inaczej wnętrza powstaną wokół ograniczenia.
+
+### 10.2 Kolizja nie zna `SpanFlags.Stairs` — spłata w **M3**, razem z fizyką
+
+Ruch gracza zna jeden próg: `STEP_UP = 0,6 m`. Schodów nie rozpoznaje, mimo że
+flaga `Stairs` istnieje i generator ją ustawia. Skutek jest odwrotny do zamierzonego
+kierunku zależności: **generator lochu dopasowuje nachylenie biegów do progu kolizji**
+(`MAX_CLIMB` w `dungeon.ts`, minimalna długość biegu liczona z `LEVEL_DROP / MAX_CLIMB`,
+rampa wejściowa kończąca zjazd przed komorą). Reguła gry rządzi geometrią świata —
+odwrotnie niż mówi §0, gdzie świat jest funkcją seeda, a nie ustawień gracza.
+
+Widać to gołym okiem: każdy bieg schodów w lochu ma nachylenie tuż poniżej 0,55 m
+na komórkę, bo tyle wolno. Kręte, strome zejście jest dziś niewyrażalne.
+
+Spłata: kolizja pytająca o flagę spanu — na `Stairs` obowiązuje inny próg (albo
+brak progu, z ograniczeniem prędkości). Wtedy `MAX_CLIMB` znika z generatora
+i długość biegu wraca do bycia decyzją kompozycyjną. Robimy to w M3, bo to ten
+sam obszar co reszta fizyki ruchu.
+
+---
+
+## 11. Pułapki (z doświadczenia z tym rendererem)
 
 1. Hash tekstury po współrzędnych **ekranu** zamiast świata → fasady „pływają". Klasyk.
 2. Brak run-length w blicie → 10 000 `fillText` i 15 fps. To była połowa wydajności prototypu.
@@ -449,7 +556,7 @@ Po M6: więcej contentu, nie więcej systemów. To jest moment, w którym takie 
 
 ---
 
-## 11. Praca z Claude Code
+## 12. Praca z Claude Code
 
 ### CLAUDE.md (do repo)
 
@@ -484,7 +591,7 @@ modułami, więc każdy z nich da się zlecić osobno i odebrać po testach.
 
 ---
 
-## 12. Gdyby jednak Shadowrun
+## 13. Gdyby jednak Shadowrun
 
 Zmiany są mniejsze, niż się wydaje, bo miasto już stoi:
 
