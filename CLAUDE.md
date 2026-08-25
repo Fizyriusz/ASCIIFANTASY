@@ -116,7 +116,7 @@ pnpm bench           # budżety wydajności
 
 ---
 
-## Rytm commitów
+## Rytm commitów, gałęzie i tagi
 
 **Commituj po każdym module, który przechodzi `pnpm typecheck` i `pnpm test` — nie
 na końcu zlecenia.** Jeden moduł = jeden commit, nawet gdy zlecenie jest jednym
@@ -137,6 +137,31 @@ z nich, w komentarzu albo w dokumentacji.
 
 `git push` robisz **wyłącznie na wyraźną prośbę**. Commit lokalny to zapis postępu,
 push to publikacja i decyzja należy do człowieka.
+
+### Gałąź na milestone (od M3)
+
+Praca idzie na `milestone/mN`, merge do `main` **po odbiorze**, nie w trakcie.
+Powód nie jest ceremonialny: `main` jest tym, co Vercel wystawia jako produkcyjny
+deploy, a więc tym, z czego robi się nagrania i pokazy. Milestone w trakcie robót
+ma stan, w którym coś działa w połowie — na `main` to znaczy, że nie ma z czego
+nagrywać, dopóki zlecenie się nie skończy.
+
+Vercel buduje każdą gałąź osobno, więc `milestone/mN` dostaje własny preview URL
+i to on służy do oglądania postępów. Nic nie trzeba w tym celu konfigurować.
+
+### Tag na stan nagrywalny
+
+Każdy odebrany milestone dostaje tag `mN-recording` na commicie, którym się kończy:
+
+```bash
+git tag -a m3-recording <sha> -m "M3: <co w nim jest>. Stan nagrywalny."
+git push --tags
+```
+
+Powód: nagranie robi się zwykle później niż kod, a świat jest funkcją seeda **i kodu**.
+Ten sam seed po zmianie generatora daje inny teren, więc bez tagu materiał nagrany
+z M1 nie daje się odtworzyć po wejściu M2. Istniejące tagi:
+`m1-recording` (5224af3), `m2-recording` (edd3a42).
 
 ---
 
