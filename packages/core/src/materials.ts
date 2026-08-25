@@ -48,6 +48,20 @@ export interface Material {
   emissive: number;
   /** czy przez materiał widać dalszą geometrię — otwór drzwiowy, okno */
   transparent: boolean;
+  /**
+   * Najniższa luminancja, przy której materiał w ogóle **widać**.
+   *
+   * Blit kwantyzuje kolor do 15 bitów przez `pack15`, czyli obcina trzy młodsze
+   * bity każdego kanału. Kamień o barwie 112 przy luminancji 0,04 daje kanał 5,
+   * a `5 >> 3` to zero: renderer maluje wtedy glif **czarny na czarnym**. Z punktu
+   * widzenia gracza to nie jest ciemna ściana, tylko brak ściany — a w lochu ta
+   * różnica decyduje o tym, czy da się nawigować.
+   *
+   * Próg wychodzi z kwantyzacji, nie z gustu: `8 / najjaśniejszy kanał` to dokładnie
+   * ta luminancja, przy której kolor przestaje się zerować. Materiał ciemny gaśnie
+   * wcześniej niż jasny i tak ma być.
+   */
+  minLum: number;
 }
 
 /**
@@ -83,6 +97,15 @@ function codes(s: string): readonly number[] {
 }
 
 /**
+ * Luminancja, poniżej której `pack15` zeruje wszystkie trzy kanały tego koloru.
+ * Materiał czarny (otwór drzwiowy) dostaje nieskończoność i nie maluje się nigdy.
+ */
+function minVisibleLum(r: number, g: number, b: number): number {
+  const max = r > g ? (r > b ? r : b) : g > b ? g : b;
+  return max <= 0 ? Number.POSITIVE_INFINITY : 8 / max;
+}
+
+/**
  * Zamienia definicje z paczki settingu na tablicę materiałów renderera.
  * Wołane raz przy starcie sceny — indeks w wyniku odpowiada indeksowi w paczce,
  * bo to właśnie ten indeks świat zapisuje w spanie.
@@ -102,6 +125,7 @@ export function compileMaterials(defs: readonly MaterialDef[]): Material[] {
       roughness: d.roughness,
       emissive: d.emissive,
       transparent: d.transparent === true,
+      minLum: minVisibleLum(d.r, d.g, d.b),
     };
   }
   return out;

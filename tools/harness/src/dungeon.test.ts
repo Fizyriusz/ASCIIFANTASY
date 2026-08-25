@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderWorld } from '@rpg/core';
+import { compileMaterials, renderWorld } from '@rpg/core';
 import { wildPack } from '@rpg/content';
 import {
   CHUNK_SIZE,
@@ -11,6 +11,9 @@ import {
   mouthFloor,
 } from '@rpg/world';
 import { assertSnapshot } from './snapshot.js';
+
+/** Indeks trawy w paczce wild — materiał kontrolny „zwykły teren". */
+const WILD_GROUND = 1;
 import {
   DUNGEON_VIEWS,
   WILD_SEED,
@@ -52,6 +55,14 @@ describe('podziemia — snapshoty', () => {
     assertSnapshot('cave-mouth', screen.toText());
   });
 
+  it('cave-approach: wejście z trzydziestu metrów, w dzień', () => {
+    const s = dungeonScene('approach', { torch: false });
+    s.ctx.light.daylight = wildPack.light.daylightDay;
+    const screen = referenceScreen();
+    renderWorld(s.store, s.camera, screen, s.ctx);
+    assertSnapshot('cave-approach', screen.toText());
+  });
+
   it('doorway-through: widok przez otwarte drzwi', () => {
     const s = hutScene('door');
     const screen = referenceScreen();
@@ -87,14 +98,25 @@ describe('ciemność', () => {
   });
 
   it('pochodnia oświetla tylko swój zasięg', () => {
+    // „Nie cały ekran" jest złym testem zasięgu: w korytarzu dwumetrowym ściany
+    // i strop są kilka metrów od oka, więc przy każdym rozsądnym zasięgu pochodni
+    // brzegi kadru są zamalowane. Zasięg widać w **głębi**: koniec korytarza dalej
+    // niż pochodnia rzutuje się w okolice punktu zbiegu i ma być czarny.
     const s = dungeonScene('torch');
     const screen = referenceScreen();
     renderWorld(s.store, s.camera, screen, s.ctx);
     let painted = 0;
     for (let i = 0; i < screen.chars.length; i++) if ((screen.chars[i] ?? 0) !== 0) painted++;
-    // coś widać, ale nie cały ekran — inaczej pochodnia nie miałaby zasięgu
-    expect(painted).toBeGreaterThan(100);
-    expect(painted).toBeLessThan(screen.chars.length * 0.85);
+    expect(painted).toBeGreaterThan(1000);
+
+    // okno tuż nad punktem zbiegu: dalszy koniec korytarza, bez podłogi u dołu kadru
+    const c0 = Math.floor(screen.cols / 2) - 8;
+    const r0 = Math.floor(screen.rows / 2) - 8;
+    let deep = 0;
+    for (let r = r0; r < r0 + 8; r++) {
+      for (let c = c0; c < c0 + 16; c++) if ((screen.chars[r * screen.cols + c] ?? 0) !== 0) deep++;
+    }
+    expect(deep).toBe(0);
   });
 });
 
@@ -209,11 +231,15 @@ describe('spójność lochu', () => {
           expect(Math.abs(a.floorZ - b.floorZ) / len).toBeLessThanOrEqual(STEP_UP);
         }
 
-        // rampa wejściowa, komórka po komórce od wylotu na zewnątrz
+        // Rampa wejściowa, komórka po komórce od wylotu na zewnątrz. Wcięcie
+        // skręca, więc trasa idzie łamaną: cztery komórki wzdłuż osi tunelu,
+        // potem prostopadle.
         let prev = mouthFloor(g, g.mouthX, g.mouthY, 1e6);
-        for (let s = 1; s <= 12; s++) {
-          const x = g.mouthX + g.mouthDirX * s;
-          const y = g.mouthY + g.mouthDirY * s;
+        for (let s = 1; s <= 15; s++) {
+          const along = s <= 4 ? s : 4;
+          const side = s <= 4 ? 0 : s - 4;
+          const x = g.mouthX + g.mouthDirX * along + g.bendX * side;
+          const y = g.mouthY + g.mouthDirY * along + g.bendY * side;
           const z = mouthFloor(g, x, y, 1e6);
           expect(z - prev).toBeLessThanOrEqual(STEP_UP);
           prev = z;
@@ -247,6 +273,42 @@ describe('spójność lochu', () => {
   });
 });
 
+describe('wejście jako punkt orientacyjny', () => {
+  it('z trzydziestu metrów wlot ma własną sylwetkę', () => {
+    // Kontrola: ta sama scena z obrzeżem i bryłami z materiału zwykłego terenu.
+    // Różnica między kadrami to dokładnie to, co gracz widzi jako „tam coś jest".
+    const s = dungeonScene('approach', { torch: false });
+    s.ctx.light.daylight = wildPack.light.daylightDay;
+    const withRim = referenceScreen();
+    renderWorld(s.store, s.camera, withRim, s.ctx);
+
+    const flat = {
+      ...wildPack,
+      underground: { ...wildPack.underground, rock: WILD_GROUND, rubble: WILD_GROUND },
+    };
+    clearDungeonCache();
+    const plain = new ChunkStore(WILD_SEED, flat, 3);
+    plain.loadRing(s.camera);
+    const without = referenceScreen();
+    renderWorld(plain, s.camera, without, { ...s.ctx, materials: compileMaterials(flat.materials) });
+
+    let painted = 0;
+    let diff = 0;
+    for (let i = 0; i < withRim.chars.length; i++) {
+      if ((withRim.chars[i] ?? 0) !== 0) painted++;
+      if (
+        (withRim.chars[i] ?? 0) !== (without.chars[i] ?? 0) ||
+        (withRim.colors[i] ?? 0) !== (without.colors[i] ?? 0)
+      ) {
+        diff++;
+      }
+    }
+    expect(painted).toBeGreaterThan(3000);
+    // pomiar przy dodaniu: 2110 komórek, 35% zamalowanego kadru
+    expect(diff).toBeGreaterThan(800);
+  });
+});
+
 describe('otwory w kolumnie', () => {
   it('przez drzwi widać wnętrze, a nie ścianę', () => {
     // Dowód, że maska pokrycia działa: w kolumnie na wprost otworu muszą pojawić
@@ -276,6 +338,21 @@ describe('otwory w kolumnie', () => {
       renderWorld(s.store, s.camera, screen, ctx);
       expect(`${view}: ${ctx.maskedColumns}`).toBe(`${view}: 0`);
     }
+  });
+
+  it('woda oznaczona jako przezroczysta wpada w strażnika', () => {
+    // Odpowiedź na pytanie „czy strażnik broni przed czymś, co może zajść".
+    // Scena `river` nie ma otworów, więc dziś daje zero — ale wystarczy jeden wpis
+    // w paczce, żeby każda kolumna z wodą poszła wolną ścieżką. Tu ten wpis robimy
+    // naumyślnie i sprawdzamy, że licznik to widzi.
+    const s = wildScene('river');
+    const ctx = wildContext();
+    ctx.materials = compileMaterials(
+      wildPack.materials.map((m) => (m.id === 'water' ? { ...m, transparent: true } : m)),
+    );
+    const screen = referenceScreen();
+    renderWorld(s.store, s.camera, screen, ctx);
+    expect(ctx.maskedColumns).toBeGreaterThan(20);
   });
 
   it('licznik kolumn z maską nie jest martwy', () => {

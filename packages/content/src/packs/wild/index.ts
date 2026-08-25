@@ -100,8 +100,15 @@ const materials: readonly MaterialDef[] = [
  * kasuje całą mechanikę eksploracji podziemi.
  */
 const light: LightDef = {
-  torchRadius: 8,
-  torchPower: 0.95,
+  // Zasięg to miejsce, w którym tłumienie kwadratowe dochodzi do zera, a nie
+  // zasięg użyteczny. Przy ośmiu metrach użyteczne było **sześć**, dalej ekran
+  // robił się czarny w dwóch krokach: (1-d²/r²)² gasi ostatnią trzecią zasięgu
+  // poniżej progu widoczności. Szesnaście metrów daje czytelny gradient do ośmiu
+  // (jasne pasmo do 4,5 m, średnie do 11 m) i najsłabsze glify do dwunastu.
+  torchRadius: 16,
+  // Moc niższa niż zasięg, bo przy 0,95 pierwsze cztery metry wysycały pasmo
+  // jasne i tuż przy graczu nie było żadnego zróżnicowania.
+  torchPower: 0.8,
   daylightDay: 1,
   daylightNight: 0,
   sourceRadius: 7,

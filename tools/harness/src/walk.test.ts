@@ -38,15 +38,19 @@ function stepTo(
   return null;
 }
 
-/** Ile pierwszych komórek trasy leży jeszcze na powierzchni. */
-const APPROACH = 13;
+/** Ile pierwszych komórek trasy leży jeszcze na powierzchni (oba ramiona wcięcia). */
+const APPROACH = 17;
 
 /** Trasa: od wejścia wzdłuż łańcucha korytarzy do ostatniej komory. */
 function route(seed: number, nx: number, ny: number): Array<[number, number]> {
   const g = dungeonAt(seed, nx, ny);
   const path: Array<[number, number]> = [];
-  // podejście z zewnątrz: dziesięć komórek wzdłuż osi wcięcia
-  for (let s = 12; s >= 0; s--) path.push([g.mouthX + g.mouthDirX * s, g.mouthY + g.mouthDirY * s]);
+  // Podejście z zewnątrz łamaną wcięcia: najpierw drugie ramię (od otwartego
+  // terenu do kolana), potem pierwsze (od kolana do wylotu tunelu).
+  for (let s = 12; s >= 1; s--) {
+    path.push([g.mouthX + g.mouthDirX * 4 + g.bendX * s, g.mouthY + g.mouthDirY * 4 + g.bendY * s]);
+  }
+  for (let s = 4; s >= 0; s--) path.push([g.mouthX + g.mouthDirX * s, g.mouthY + g.mouthDirY * s]);
   for (const c of g.corridors) {
     const sx = Math.sign(c.x1 - c.x0);
     const sy = Math.sign(c.y1 - c.y0);

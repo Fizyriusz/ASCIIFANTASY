@@ -29,7 +29,9 @@ import type { DungeonGraph, DungeonVoid } from './dungeon.js';
 import {
   bedrockUnder,
   dungeonMouthAt,
+  dungeonRimAt,
   dungeonRockBase,
+  mouthDepth,
   dungeonVoidsAt,
   dungeonsNear,
   mouthFloor,
@@ -56,14 +58,27 @@ const ROOF_MIN = 0.6;
  * ile światło potrzebuje, żeby zgasnąć — inaczej komórka przy krawędzi chunka
  * dostałaby inną wartość niż ta sama komórka policzona z drugiej strony granicy.
  */
-const LIGHT_MARGIN = 3;
+const LIGHT_MARGIN = 5;
 /**
- * Ile światła gubi komórka pustki. Trójka dawała dziesięć metrów dziennego
- * światła w głąb tunelu — tyle, że wejście do jaskini wyglądało jak korytarz
- * z oświetleniem. Piątka gasi je po sześciu metrach i dopiero wtedy przejście
- * powierzchnia → podziemie jest widoczne w jednym kadrze.
+ * Ile światła gubi komórka pustki.
+ *
+ * Piątka gasiła dzień po sześciu metrach i przejście z pełnego światła w czerń
+ * zajmowało dwa kroki — bo skala 0..15 przy komórce dwumetrowej daje wtedy trzy
+ * poziomy na cały tunel. Wracamy do trójki: dziesięć metrów półmroku przy wlocie
+ * to nie błąd, tylko tak wygląda jaskinia. Ciemność bierze się z **długości drogi**
+ * i z zakrętu wcięcia, który urywa linię wzroku do powierzchni, a nie ze stromego
+ * tłumienia na komórkę.
  */
-const ATTENUATION = 5;
+const ATTENUATION = 3;
+/**
+ * O ile spada dostęp do nieba na każdy metr głębokości wcięcia, i dolna granica.
+ *
+ * Wąwóz nie jest otwartą łąką: im głębiej między ścianami, tym węższy pasek nieba.
+ * Bez tego cała rynna ma pełne 15 i gradient zaczyna się dopiero za wylotem tunelu,
+ * czyli dokładnie tam, gdzie gracz widzi schodek.
+ */
+const SKY_PER_METER = 0.35;
+const SKY_MIN = 12;
 const LIGHT_STRIDE = CHUNK_SIZE + 2 * LIGHT_MARGIN;
 
 /**
@@ -94,6 +109,12 @@ export class Chunk {
 const heightField = new Float32Array(STRIDE * STRIDE);
 const lightField = new Uint8Array(LIGHT_STRIDE * LIGHT_STRIDE);
 const kindField = new Uint8Array(LIGHT_STRIDE * LIGHT_STRIDE);
+/** rzut komórki na łamaną wcięcia — bufor współdzielony, zero alokacji */
+const rimProj = { s: 0, p: 0 };
+/** komórki: jak daleko od wylotu sięgają bryły łuku */
+const ARCH_REACH = 3;
+/** metry: najniższa bryła łuku; wyższe dobiera hash */
+const ARCH_MIN = 1.4;
 const pick: PropPick = { def: 0, height: 0, trunkTop: 0 };
 const nearSegs: RiverSegment[] = [];
 /**
@@ -163,6 +184,26 @@ function lightKind(
 }
 
 /**
+ * Ile światła dnia dociera do komórki otwartej na niebo.
+ *
+ * Drzwi i okno chaty dostają pełne 15 — stoją w płaskiej ścianie i widzą całe niebo.
+ * Wcięcie jaskini dostaje tym mniej, im jest głębsze: to jedyne miejsce, w którym
+ * gradient „dzień → podziemie" ma szansę się zacząć, zanim gracz wejdzie pod strop.
+ */
+function openingSky(
+  seed: number,
+  wx: number,
+  wy: number,
+  graphs: readonly DungeonGraph[],
+): number {
+  const g = dungeonMouthAt(graphs, wx, wy);
+  if (g === null) return 15;
+  const d = mouthDepth(g, wx, wy, terrainHeight(seed, wx, wy));
+  const v = 15 - Math.round(d * SKY_PER_METER);
+  return v < SKY_MIN ? SKY_MIN : v;
+}
+
+/**
  * Światło **podziemne**: 15 w otworach, 0 głęboko pod stropem, tłumienie 3 na
  * komórkę pustki.
  *
@@ -192,7 +233,7 @@ function computeLight(
       const kind = lightKind(seed, wx, wy, graphs, structs);
       const k = j * LIGHT_STRIDE + i;
       kindField[k] = kind;
-      lightField[k] = kind === CELL_OPENING ? 15 : 0;
+      lightField[k] = kind === CELL_OPENING ? openingSky(seed, wx, wy, graphs) : 0;
     }
   }
   for (let j = 1; j < LIGHT_STRIDE; j++) {
@@ -271,6 +312,8 @@ export function generateChunk(seed: number, cx: number, cy: number, pack: Conten
       const cell = ly * CHUNK_SIZE + lx;
       const base = cell * MAX_SPANS_PER_CELL;
       let n = 0;
+      // ile nieba widzi ta komórka; 15 wszędzie poza wcięciem jaskini
+      let cellSky = 15;
 
       if (structureAtCell(structs, wx, wy, hut)) {
         // --- chata: podłoga, ściany, otwory ---
@@ -315,9 +358,10 @@ export function generateChunk(seed: number, cx: number, cy: number, pack: Conten
           n = 3;
         }
       } else if (dungeonMouthAt(graphs, wx, wy) !== null) {
-        // --- otwór jaskini: rampa w dół, bez stropu, otwarty na niebo ---
+        // --- wcięcie wejściowe: rampa w dół, bez stropu, otwarte na niebo ---
         const g = dungeonMouthAt(graphs, wx, wy);
         const floorZ = g === null ? h : mouthFloor(g, wx, wy, h);
+        cellSky = openingSky(seed, wx, wy, graphs);
         chunk.bottoms[base] = bedrockUnder(floorZ);
         chunk.tops[base] = floorZ;
         chunk.mats[base] = M.rock;
@@ -367,19 +411,45 @@ export function generateChunk(seed: number, cx: number, cy: number, pack: Conten
         // inaczej pod nią zostaje pustka, przez którą widać loch od spodu.
         chunk.bottoms[base] = dungeonRockBase(graphs, wx, wy, h - SUBSTRATE);
         chunk.tops[base] = h;
-        chunk.mats[base] = biome?.cliff ?? 0;
-        chunk.capMats[base] = biome?.ground ?? 0;
+        const rim = dungeonRimAt(graphs, wx, wy, rimProj);
+        if (rim !== null) {
+          // obrzeże wcięcia: darń zdarta, widać skałę — to jest znak w terenie
+          chunk.mats[base] = M.rock;
+          chunk.capMats[base] = M.rubble;
+        } else {
+          chunk.mats[base] = biome?.cliff ?? 0;
+          chunk.capMats[base] = biome?.ground ?? 0;
+        }
         chunk.spanFlags[base] = SpanFlags.Solid;
         n = 1;
 
-        if (water !== null && water > h) {
+        // Resztki kamiennego łuku przy samym wylocie: kilka pionowych brył łamiących
+        // linię horyzontu. Wcięcie samo w sobie jest ciemną plamą i z trzydziestu
+        // metrów nie odróżnia się od cienia pod drzewem — bryły odróżniają się.
+        if (rim !== null && rimProj.s <= ARCH_REACH) {
+          const hash = h32(wx, wy, seed, 0xa2c4);
+          if ((hash & 3) !== 0) {
+            chunk.bottoms[base + n] = h;
+            chunk.tops[base + n] = h + ARCH_MIN + ((hash >>> 8) & 15) * 0.08;
+            chunk.mats[base + n] = M.rock;
+            chunk.capMats[base + n] = M.rubble;
+            chunk.spanFlags[base + n] = SpanFlags.Solid;
+            n++;
+          }
+        }
+
+        if (n === 1 && water !== null && water > h) {
           chunk.bottoms[base + n] = h;
           chunk.tops[base + n] = water;
           chunk.mats[base + n] = waterMat;
           chunk.capMats[base + n] = waterMat;
           chunk.spanFlags[base + n] = SpanFlags.Water;
           n++;
-        } else if (biome !== undefined && propAt(seed, wx, wy, biome, pack.props, slope, pick)) {
+        } else if (
+          n === 1 &&
+          biome !== undefined &&
+          propAt(seed, wx, wy, biome, pack.props, slope, pick)
+        ) {
           const def = pack.props[pick.def];
           if (def !== undefined) {
             if (def.kind === 'tree' && n + 1 < MAX_SPANS_PER_CELL) {
@@ -425,7 +495,13 @@ export function generateChunk(seed: number, cx: number, cy: number, pack: Conten
       // a minimum z samą sobą nic nie zmienia.
       const lk = (ly + LIGHT_MARGIN) * LIGHT_STRIDE + (lx + LIGHT_MARGIN);
       const under = kindField[lk] === CELL_SOLID ? 15 : (lightField[lk] ?? 0);
-      chunk.lights[cell] = ((biome?.light ?? 15) << 4) | under;
+      // Wcięcie widzi mniej nieba niż otwarty teren, więc jego jasność powierzchni
+      // jest **przeskalowana**, a nie przycięta: cień koron i wąskość wąwozu to dwa
+      // niezależne tłumienia tego samego światła. Minimum dawałoby w lesie zero
+      // różnicy, bo biom jest tam ciemniejszy niż najgłębsze wcięcie.
+      const bioRaw = biome?.light ?? 15;
+      const bio = cellSky >= 15 ? bioRaw : Math.round((bioRaw * cellSky) / 15);
+      chunk.lights[cell] = (bio << 4) | under;
 
       // hash liczony z zaokrąglonych wartości — Float32 jest deterministyczny,
       // ale zaokrąglenie do centymetrów czyni test odpornym na kosmetyczne zmiany

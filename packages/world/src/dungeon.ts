@@ -35,9 +35,13 @@ const BEDROCK = 24;
  * daje na przestrzeni komory spadek rzędu trzech metrów, a komora leży pięć
  * metrów pod ziemią.
  */
-const MOUTH_LEN = 10;
+const MOUTH_LEG1 = 4;
+/** komórki: drugie ramię wcięcia, już za zakrętem — wychodzi na otwarty teren */
+const MOUTH_LEG2 = 12;
 /** komórki: połowa szerokości wcięcia — trzy komórki wystarczą, żeby wejść */
 const MOUTH_HALF = 1;
+/** komórki: pas skalnego obrzeża po obu stronach wcięcia (punkt orientacyjny) */
+const MOUTH_RIM = 1;
 /**
  * Metry na komórkę: nachylenie rampy wejściowej i schodów.
  *
@@ -100,9 +104,19 @@ export interface DungeonGraph {
   /** komórka wejścia — wylot wcięcia w zboczu */
   mouthX: number;
   mouthY: number;
-  /** jednostkowy kierunek „na zewnątrz" wzdłuż wcięcia wejściowego */
+  /** jednostkowy kierunek „na zewnątrz" wzdłuż pierwszego ramienia wcięcia */
   mouthDirX: number;
   mouthDirY: number;
+  /**
+   * Kierunek drugiego ramienia, prostopadły do pierwszego. Wcięcie **skręca**,
+   * i to nie jest ozdoba: proste wcięcie zostawia linię wzroku z wnętrza wprost
+   * na oświetlony teren, więc przejście dzień → ciemność dzieje się na dwóch
+   * komórkach niezależnie od tego, jak ustawimy tłumienie światła. Zakręt
+   * urywa tę linię po kilkunastu metrach i ciemność bierze się z **długości
+   * drogi**, a nie ze stromego tłumienia.
+   */
+  bendX: number;
+  bendY: number;
   rooms: readonly DungeonRoom[];
   corridors: readonly DungeonCorridor[];
   /** indeks pokoju z wejściem */
@@ -125,6 +139,8 @@ const EMPTY_GRAPH: DungeonGraph = {
   mouthY: 0,
   mouthDirX: 1,
   mouthDirY: 0,
+  bendX: 0,
+  bendY: 1,
   rooms: [],
   corridors: [],
   entrance: -1,
@@ -358,12 +374,18 @@ export function dungeonAt(seed: number, nx: number, ny: number): DungeonGraph {
       if (mdx === 0 && mdy === 0) mdx = 1;
     }
 
+    // zakręt w lewo albo w prawo — bit poiId, żeby nie wszystkie wejścia
+    // wyglądały tak samo
+    const bendSign = (poiId & 2) === 0 ? 1 : -1;
+
     out = {
       poiId,
       mouthX,
       mouthY,
       mouthDirX: mdx,
       mouthDirY: mdy,
+      bendX: -mdy * bendSign,
+      bendY: mdx * bendSign,
       rooms,
       corridors,
       entrance: 0,
@@ -430,6 +452,63 @@ export function dungeonRockBase(
  * Czy komórka należy do otworu jaskini. Otwór nie ma stropu i wpuszcza światło,
  * a jego podłoga jest rampą schodzącą od powierzchni do pierwszej komory.
  */
+/** Wynik rzutowania komórki na łamaną wcięcia. Współdzielony, zerowa alokacja. */
+export interface MouthProjection {
+  /** droga wzdłuż wcięcia od wylotu tunelu, w komórkach */
+  s: number;
+  /** odległość w bok od osi wcięcia, w komórkach */
+  p: number;
+}
+
+const proj: MouthProjection = { s: 0, p: 0 };
+
+/**
+ * Rzutuje komórkę na łamaną wcięcia: pierwsze ramię biegnie od wylotu tunelu
+ * na zewnątrz, drugie odbija prostopadle. Zwraca `false`, gdy komórka leży poza
+ * pasem wpływu wcięcia (szerokość wcięcia plus obrzeże).
+ *
+ * Jedna funkcja dla trzech pytań — czy to wcięcie, jaka wysokość podłogi, czy to
+ * obrzeże — bo wszystkie trzy potrzebują tej samej pary liczb, a liczone są raz
+ * na komórkę chunka.
+ */
+export function mouthProject(
+  g: DungeonGraph,
+  wx: number,
+  wy: number,
+  out: MouthProjection,
+): boolean {
+  const dx = wx - g.mouthX;
+  const dy = wy - g.mouthY;
+  const limit = MOUTH_HALF + MOUTH_RIM + 0.5;
+
+  const a1 = dx * g.mouthDirX + dy * g.mouthDirY;
+  const p1abs = Math.abs(dx * g.bendX + dy * g.bendY);
+  const ok1 = a1 >= -0.5 && a1 <= MOUTH_LEG1 && p1abs <= limit;
+
+  // drugie ramię liczone od kolana
+  const bx = dx - g.mouthDirX * MOUTH_LEG1;
+  const by = dy - g.mouthDirY * MOUTH_LEG1;
+  const a2 = bx * g.bendX + by * g.bendY;
+  const p2abs = Math.abs(bx * g.mouthDirX + by * g.mouthDirY);
+  const ok2 = a2 > 0 && a2 <= MOUTH_LEG2 && p2abs <= limit;
+
+  // Na kolanie oba ramiona zgłaszają tę samą komórkę i wygrywa **bliższe osi**.
+  // Kolejność „pierwsze pasujące" dawała tu komórki środka wcięcia zaliczone do
+  // obrzeża sąsiedniego ramienia, czyli dziurę w rynnie tuż za zakrętem.
+  if (ok1 && (!ok2 || p1abs <= p2abs)) {
+    out.s = a1 < 0 ? 0 : a1;
+    out.p = p1abs;
+    return true;
+  }
+  if (ok2) {
+    out.s = MOUTH_LEG1 + a2;
+    out.p = p2abs;
+    return true;
+  }
+  return false;
+}
+
+/** Czy komórka leży **w** wcięciu (a nie na jego obrzeżu). */
 export function dungeonMouthAt(
   graphs: readonly DungeonGraph[],
   wx: number,
@@ -438,15 +517,31 @@ export function dungeonMouthAt(
   for (let i = 0; i < graphs.length; i++) {
     const g = graphs[i];
     if (g === undefined || g.rooms.length === 0) continue;
-    const dx = wx - g.mouthX;
-    const dy = wy - g.mouthY;
-    // wcięcie biegnie **na zewnątrz**, wzdłuż osi wejścia: `s` to odległość
-    // od wylotu korytarza w stronę zbocza, `p` odchylenie w bok
-    const sAlong = dx * g.mouthDirX + dy * g.mouthDirY;
-    if (sAlong < -0.5 || sAlong > MOUTH_LEN) continue;
-    const pSide = -dx * g.mouthDirY + dy * g.mouthDirX;
-    if (pSide < -MOUTH_HALF - 0.5 || pSide > MOUTH_HALF + 0.5) continue;
-    return g;
+    if (!mouthProject(g, wx, wy, proj)) continue;
+    if (proj.p <= MOUTH_HALF + 0.5) return g;
+  }
+  return null;
+}
+
+/**
+ * Czy komórka jest **obrzeżem** wcięcia: pasem tuż obok, który dostaje nagą skałę
+ * zamiast darni, a przy samym wylocie także pionowe bryły.
+ *
+ * To jest punkt orientacyjny, nie dekoracja. Wcięcie oglądane z trzydziestu metrów
+ * jest ciemną plamą nieodróżnialną od cienia pod drzewem; jasne obrzeże i kilka
+ * brył łamiących linię horyzontu dają sylwetkę, po której da się je znaleźć.
+ */
+export function dungeonRimAt(
+  graphs: readonly DungeonGraph[],
+  wx: number,
+  wy: number,
+  out: MouthProjection,
+): DungeonGraph | null {
+  for (let i = 0; i < graphs.length; i++) {
+    const g = graphs[i];
+    if (g === undefined || g.rooms.length === 0) continue;
+    if (!mouthProject(g, wx, wy, out)) continue;
+    if (out.p > MOUTH_HALF + 0.5) return g;
   }
   return null;
 }
@@ -462,13 +557,22 @@ export function dungeonMouthAt(
 export function mouthFloor(g: DungeonGraph, wx: number, wy: number, surface: number): number {
   const room = g.rooms[0];
   if (room === undefined) return surface;
-  const dx = wx - g.mouthX;
-  const dy = wy - g.mouthY;
-  let sAlong = dx * g.mouthDirX + dy * g.mouthDirY;
-  if (sAlong < 0) sAlong = 0;
-  const z = room.floorZ + sAlong * MAX_CLIMB;
+  if (!mouthProject(g, wx, wy, proj)) return surface;
+  const z = room.floorZ + proj.s * MAX_CLIMB;
   const cap = surface - 0.4;
   return z < cap ? z : cap;
+}
+
+/**
+ * Głębokość wcięcia w komórce — ile metrów skały jest nad podłogą wąwozu.
+ *
+ * Steruje ilością nieba, jakie do tej komórki dochodzi: wąskie, głębokie wcięcie
+ * widzi pasek nieba, a płytki rów prawie całe. Bez tego cała rynna ma pełne światło
+ * dnia i przejście na ciemność tunelu jest schodkiem, a nie zejściem.
+ */
+export function mouthDepth(g: DungeonGraph, wx: number, wy: number, surface: number): number {
+  const d = surface - mouthFloor(g, wx, wy, surface);
+  return d > 0 ? d : 0;
 }
 
 /** Postęp zjazdu 0..1 po `dist` komórkach biegu o rampie `cells`. */

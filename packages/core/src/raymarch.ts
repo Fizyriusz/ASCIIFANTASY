@@ -189,14 +189,14 @@ export interface RenderOptions {
 const NO_SURFACE = 1e6;
 
 /**
- * Luminancja, poniżej której komórka zostaje **pusta** zamiast dostać najciemniejszy
- * glif rampy.
+ * Próg malowania jest **per materiał** (`Material.minLum`), nie globalny.
  *
- * Bez tego progu „w lochu bez światła nie widać nic" jest niewykonalne: rampa ciemna
- * ma swój glif i przy zerowej luminancji renderer malowałby kropki w idealnej
- * ciemności. Próg jest celowo bardzo nisko — ma odcinać zero, a nie przygaszać obraz.
+ * Bez progu „w lochu bez światła nie widać nic" jest niewykonalne: rampa ciemna ma
+ * swój glif i przy zerowej luminancji renderer malowałby kropki w idealnej ciemności.
+ * Ale próg globalny 0,035 był **poniżej** granicy widoczności kamienia: przy 0,04
+ * kolor po kwantyzacji `pack15` wychodzi czarny, więc glif był malowany i niewidoczny
+ * naraz. Teraz każdy materiał gaśnie tam, gdzie faktycznie znika jego kolor.
  */
-const LIGHT_CUTOFF = 0.035;
 
 export function createRenderContext(
   materials: readonly Material[],
@@ -597,7 +597,7 @@ export function renderColumn(
               zRow = eyeZ + (horizon - (row + 0.5)) * distM / kv;
               lum = lightAt(rig, hitXm, hitYm, zRow, surfaceLight, faceAccess) * fog * face;
               if (wallM.emissive > 0) lum += (1 - lum) * wallM.emissive;
-              if (lum < LIGHT_CUTOFF) continue;
+              if (lum < wallM.minLum) continue;
               screen.putUnsafe(
                 col,
                 row,
@@ -631,7 +631,7 @@ export function renderColumn(
               capYm = (cam.y + rdy * dCapCells) * mpc;
               lum = lightAt(rig, capXm, capYm, capZ, surfaceLight, capLight) * Math.exp(-dCapM / fogDist);
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
-              if (lum < LIGHT_CUTOFF) continue;
+              if (lum < capM.minLum) continue;
               // czapka jest pozioma, wiec w glab rozciaga sie duzo mocniej niz
               // w poprzek: przy horyzoncie jeden wiersz to dziesiatki metrow
               capFoot = dCapM / den;
@@ -736,7 +736,7 @@ export function renderColumn(
               capYm = (cam.y + rdy * dCapCells) * mpc;
               lum = lightAt(rig, capXm, capYm, capZ, surfaceLight, capLight) * Math.exp(-dCapM / fogDist);
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
-              if (lum < LIGHT_CUTOFF) continue;
+              if (lum < capM.minLum) continue;
               capFoot = dCapM / den;
               if (dCapM / kh > capFoot) capFoot = dCapM / kh;
               screen.putUnsafe(
@@ -758,7 +758,7 @@ export function renderColumn(
               zRow = eyeZ + (horizon - (row + 0.5)) * distM / kv;
               lum = lightAt(rig, hitXm, hitYm, zRow, surfaceLight, faceAccess) * fog * face;
               if (wallM.emissive > 0) lum += (1 - lum) * wallM.emissive;
-              if (lum < LIGHT_CUTOFF) continue;
+              if (lum < wallM.minLum) continue;
               screen.putUnsafe(
                 col,
                 row,

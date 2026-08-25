@@ -305,6 +305,18 @@ własne światło, korytarz szesnaście metrów pod ziemią byłby jasny jak ł�
 bierze dostęp do nieba z komórki, **z której promień przyszedł**. Czapka pozioma
 działa tak samo, gdy jest przedłużeniem poprzedniej powierzchni.
 
+**Próg malowania jest per materiał, nie globalny.** Blit kwantyzuje kolor do 15 bitów,
+więc kanał poniżej ósemki wychodzi zerem: przy luminancji 0,04 kamień o barwie 112 jest
+malowany **czarny na czarnym**. Globalny próg 0,035 leżał poniżej tej granicy i dawał
+w lochu „brak ściany" zamiast ciemnej ściany. `Material.minLum` to `8 / najjaśniejszy
+kanał` — materiał ciemny gaśnie wcześniej niż jasny, bo faktycznie wcześniej znika.
+
+**Zasięg pochodni to miejsce, w którym tłumienie dochodzi do zera, a nie zasięg
+użyteczny.** Przy `(1-d²/r²)²` ostatnia trzecia zasięgu leży poniżej progu widoczności:
+promień 8 m dawał czytelne 6 m i czerń w dwóch krokach. Szesnaście metrów przy mocy 0,8
+daje pasmo jasne do 4,5 m, średnie do 11 m i najsłabsze glify do 13,5 m. To są liczby
+z paczki contentu, nie z kodu — dobiera się je pomiarem, nie na oko (tabela w M2).
+
 **Dostęp do nieba propaguje się wyłącznie przez pustki.** Pierwsza wersja pola
 traktowała litą skałę obok korytarza jak teren pod otwartym niebem i światło
 przeciekało przez ścianę. Komórka bez pustki dostaje wartość pełną, nie zerową —
@@ -541,6 +553,18 @@ Spłata: kolizja pytająca o flagę spanu — na `Stairs` obowiązuje inny próg
 brak progu, z ograniczeniem prędkości). Wtedy `MAX_CLIMB` znika z generatora
 i długość biegu wraca do bycia decyzją kompozycyjną. Robimy to w M3, bo to ten
 sam obszar co reszta fizyki ruchu.
+
+### 10.3 Wejście do jaskini jest kompozycją, nie emergentne — do rewizji w M4
+
+Wcięcie wejściowe ma zapisaną długość ramion, zakręt, nachylenie i pas obrzeża
+(`dungeon.ts`). Nie wynika z terenu — jest w niego wcinane. Dwie rzeczy z tego wynikają
+i obie są świadome: wejście zawsze wygląda podobnie, a zakręt zawsze jest w tym samym
+miejscu łamanej. Alternatywa (wejście wynikające z przecięcia stropu ze zboczem) była
+próbowana w M2 i dawała albo brak wejścia, albo odsłonięty cały pokój, bo nachylenie
+w miejscu POI jest zbyt małe względem głębokości komory.
+
+Do rewizji przy ruinach i wejściach miejskich w M4, kiedy typów wejścia będzie kilka
+i wybór między nimi przestanie być pojedynczą stałą.
 
 ---
 

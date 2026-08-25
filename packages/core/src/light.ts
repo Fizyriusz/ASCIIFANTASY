@@ -169,14 +169,6 @@ export function staticLum(rig: LightRig, staticLight: number, skyAccess: number)
 }
 
 /**
- * Czy w zestawie jest cokolwiek zależnego od położenia. Fałsz znaczy, że całe
- * światło da się policzyć raz na komórkę.
- */
-export function hasPositional(rig: LightRig): boolean {
-  return rig.count > 0 || rig.torchPower > 0;
-}
-
-/**
  * Migotanie pochodni: sinus o dwóch okresach plus szum z zegara.
  * Trzymane osobno od `lightAt`, bo zależy od czasu — a `lightAt` musi zostać
  * czystą funkcją, inaczej snapshoty przestałyby być powtarzalne.

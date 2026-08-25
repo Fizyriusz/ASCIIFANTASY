@@ -264,7 +264,13 @@ export const DUNGEON_VIEWS = {
   /** największa komora lochu, na dnie — jedyna scena podziemna ze światłem statycznym */
   room: { x: -222.5, y: -443.5, yaw: 0, pitch: 0 },
   /** długi prosty korytarz: widać, gdzie kończy się zasięg pochodni */
-  torch: { x: -155.5, y: -440.5, yaw: -Math.PI / 2, pitch: -0.1 },
+  torch: { x: -155.5, y: -440.5, yaw: Math.PI / 2, pitch: -0.1 },
+  /**
+   * Wejście z trzydziestu metrów, w dzień. Scena kontrolna punktu orientacyjnego:
+   * bez skalnego obrzeża i brył łuku wcięcie jest z tej odległości ciemną plamą
+   * nieodróżnialną od cienia pod drzewem.
+   */
+  approach: { x: -178.5, y: -412.5, yaw: -Math.PI / 2, pitch: -0.06 },
   /**
    * Wejście oglądane **od środka**: ciemny tunel dookoła, jasne wcięcie przed
    * nami. Od zewnątrz ten sam kadr się nie udaje — rampa wchodzi w zbocze
