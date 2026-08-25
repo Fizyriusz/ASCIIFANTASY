@@ -140,7 +140,9 @@ push to publikacja i decyzja należy do człowieka.
 
 ### Gałąź na milestone (od M3)
 
-Praca idzie na `milestone/mN`, merge do `main` **po odbiorze**, nie w trakcie.
+Gałąź zakładasz **sam, na starcie zlecenia** (`git switch -c milestone/mN`) — to część
+procedury, nie decyzja do skonsultowania. Praca idzie na `milestone/mN`, merge do `main`
+**po odbiorze**, nie w trakcie.
 Powód nie jest ceremonialny: `main` jest tym, co Vercel wystawia jako produkcyjny
 deploy, a więc tym, z czego robi się nagrania i pokazy. Milestone w trakcie robót
 ma stan, w którym coś działa w połowie — na `main` to znaczy, że nie ma z czego
@@ -148,6 +150,13 @@ nagrywać, dopóki zlecenie się nie skończy.
 
 Vercel buduje każdą gałąź osobno, więc `milestone/mN` dostaje własny preview URL
 i to on służy do oglądania postępów. Nic nie trzeba w tym celu konfigurować.
+
+**Gałąź milestone nie jest miejscem na czerwony stan.** Reguła commitowania nie zmienia
+się ani o jotę: każdy commit przechodzi `pnpm typecheck` i `pnpm test`, także tutaj.
+Gałąź istnieje po to, żeby `main` pozostał nagrywalny — a nie po to, żeby obniżyć próg
+jakości commita. „Wrzucę czerwone, poprawię w następnym" znaczy, że historia gałęzi
+przestaje być czytelna i że merge do `main` robi się jednym wielkim skokiem, czyli
+dokładnie tym, przed czym broni reguła jeden moduł = jeden commit.
 
 ### Tag na stan nagrywalny
 
