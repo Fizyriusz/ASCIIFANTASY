@@ -116,6 +116,30 @@ pnpm bench           # budżety wydajności
 
 ---
 
+## Rytm commitów
+
+**Commituj po każdym module, który przechodzi `pnpm typecheck` i `pnpm test` — nie
+na końcu zlecenia.** Jeden moduł = jeden commit, nawet gdy zlecenie jest jednym
+zadaniem i nawet gdy moduł sam w sobie niczego jeszcze nie robi.
+
+Powód jest jeden i jest praktyczny: przegląd sześciu kawałków jest wykonalny, przegląd
+2800 linii nie jest. M2 poszło jednym commitem (`edd3a42`, 25 plików, +2831/-128)
+i przez to cała ścieżka dojścia — maska pokrycia, pole światła, generator lochu,
+poprawki wejścia, dwie optymalizacje — jest sklejona w jedną zmianę, a komunikat
+opisuje wyłącznie ostatni krok. Rozbijanie tego po fakcie odpada: produkowałoby
+historię, która nie odpowiada temu, jak praca przebiegała, a force-push na zielony
+`main` to ryzyko bez korzyści.
+
+Podział idzie **w dół grafu zależności** z §Układ repo, żeby każdy commit był zielony
+osobno: `content` → `core` → `world` → `harness`/`apps` → `docs`. Eksperymenty,
+pomiary i ślepe uliczki nie są modułami i nie zostają w historii — zostaje wniosek
+z nich, w komentarzu albo w dokumentacji.
+
+`git push` robisz **wyłącznie na wyraźną prośbę**. Commit lokalny to zapis postępu,
+push to publikacja i decyzja należy do człowieka.
+
+---
+
 ## Definicja ukończenia zadania
 
 Zadanie jest gotowe, gdy **wszystkie** punkty są spełnione:
@@ -127,6 +151,8 @@ Zadanie jest gotowe, gdy **wszystkie** punkty są spełnione:
 4. `pnpm bench` w budżecie.
 5. Publiczne API modułu ma komentarze wyjaśniające *dlaczego*, nie *co*.
 6. Podsumowanie zawiera: co zrobione, jakie decyzje podjęte, co świadomie pominięte.
+7. Historia zmian jest podzielona na moduły zgodnie z §Rytm commitów, a nie zebrana
+   w jeden commit na koniec.
 
 ---
 
