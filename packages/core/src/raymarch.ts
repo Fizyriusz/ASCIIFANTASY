@@ -135,6 +135,17 @@ export interface RenderContext {
    * puste — tak zachowywał się renderer do M2 włącznie.
    */
   skyMaterial: number;
+  /**
+   * 1 = każda kolumna idzie ścieżką maski pokrycia, także bez otworów.
+   *
+   * Przełącznik istnieje wyłącznie dla testu regresji: maska nie zna pojęcia
+   * „kolumna zamknięta", więc dochodzi do końca zasięgu i widzi geometrię,
+   * którą szybka ścieżka mogłaby zgubić. Porównanie obu przebiegów jest jedynym
+   * tanim sposobem, żeby złapać całą rodzinę błędów „front domyka się za wcześnie"
+   * — a jeden taki błąd siedział w rendererze od M0 i wyszedł dopiero, gdy niebo
+   * przestało być czarne. W grze zostaje zerem.
+   */
+  forceMask: number;
   hasOpenings: number;
   /**
    * Ile kolumn tej klatki poszło ścieżką maski pokrycia. Diagnostyka, nie stan:
@@ -238,6 +249,17 @@ const SKY_SCALE = 200;
 const SKY_FOOT = 0.5;
 
 /**
+ * Od jakiego dostępu do nieba wolno w ogóle **zastąpić powierzchnię niebem**.
+ *
+ * Zero nie wystarczy i to był realny błąd: ściana tunelu pięć komórek od wylotu
+ * ma dostęp 1, czyli jest prawie czarna — a warunek „większy od zera" zamieniał
+ * ją w niebo o pełnej jasności. Efekt: stojąc w tunelu bez pochodni widziało się
+ * niebo dookoła zamiast skały. Próg 12 to najgłębsze wcięcie wejściowe
+ * (`SKY_MIN` w generatorze), czyli granica między „pod gołym niebem" a „w środku".
+ */
+const SKY_OPEN = 12;
+
+/**
  * Maluje jeden wiersz nieba. Hash idzie po **kierunku patrzenia**, nie po pozycji
  * kamery ani po wierszu ekranu: gwiazda stoi w miejscu, gdy gracz idzie, i obraca
  * się razem z kadrem, gdy się rozgląda.
@@ -283,6 +305,7 @@ export function createRenderContext(
     // domyślnie zachowawczo: `renderWorld` przelicza to na każdej klatce, ale
     // `renderColumn` wołane samodzielnie nie ma kiedy
     skyMaterial: opts?.skyMaterial ?? -1,
+    forceMask: 0,
     hasOpenings: 1,
     maskedColumns: 0,
     hits: createColumnHits(),
@@ -448,13 +471,13 @@ export function renderColumn(
   let floorMat = ctx.floorMat0;
   let ceilZ = ctx.ceilZ0;
   let ceilMat = ctx.ceilMat0;
-  let blocked = 0;
+
   /**
    * Tryb maski. Kolumna wchodzi w niego dopiero, gdy trafi na span z materialem
    * przezroczystym — czyli na otwor drzwiowy albo okno. Dopoki tego nie ma,
    * dziala szybka sciezka dwoch frontow i nie placi ani jednego odczytu maski.
    */
-  let masked = 0;
+  let masked = ctx.forceMask;
   let coveredCount = 0;
 
   let side = 0;
@@ -516,6 +539,11 @@ export function renderColumn(
   let probe: Material | undefined;
 
   hits.count = 0;
+  if (masked === 1) {
+    // maska wymuszona z zewnatrz zaczyna kolumne z czystym pokryciem
+    for (let r = 0; r < rows; r++) cover[r] = 0;
+    coveredCount = 0;
+  }
 
   // Niebo jest w nieskonczonosci: bez mgly, bez tlumienia odlegloscia, z pelnym
   // dostepem do nieba. Pora doby wchodzi ta sama funkcja co dla powierzchni.
@@ -623,6 +651,15 @@ export function renderColumn(
       }
 
       // --- front dolny: wszystko, na co patrzymy z gory (teren, bruk, fasady) ---
+      //
+      // Kolumna NIE konczy sie na bryle przecinajacej poziom oka, choc do M2b
+      // tak wlasnie bylo („za nia nie widac nic"). To bylo falszywe zalozenie:
+      // za pagorkiem siegajacym ponad oko stoi gora, ktora rzutuje sie WYZEJ niz
+      // jego sylwetka, a za krzakiem drzewo. Przy czarnym niebie brakujaca
+      // geometria wygladala jak cien i nikt tego nie zglosil; odkad niebo jest
+      // malowane, zostaje po niej prostokatna lata nieba w srodku lasu.
+      // Front dolny i tak pomija to, co zaslonione (`rFirst >= loRow`), wiec
+      // marsz moze isc dalej bez ryzyka przemalowania.
       for (i = n - 1; i >= 0; i--) {
         bottom = target.spanBottom(mapX, mapY, i);
         if (bottom >= eyeZ) continue; // sufit — druga petla
@@ -690,7 +727,7 @@ export function renderColumn(
                 // z niebem — bez tego odległy grzbiet wycina w niebie czarną dziurę.
                 // Pod ziemią `faceAccess` jest zerem i zostaje czerń, więc test
                 // ciemności trzyma się bez zmian.
-                if (skyM !== undefined && faceAccess > 0 && skyLum >= skyM.minLum) {
+                if (skyM !== undefined && faceAccess >= SKY_OPEN && skyLum >= skyM.minLum) {
                   skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
                 }
                 continue;
@@ -732,7 +769,7 @@ export function renderColumn(
                 FACE_FLOOR;
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
               if (lum < capM.minLum) {
-                if (skyM !== undefined && capLight > 0 && skyLum >= skyM.minLum) {
+                if (skyM !== undefined && capLight >= SKY_OPEN && skyLum >= skyM.minLum) {
                   skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
                 }
                 continue;
@@ -770,13 +807,6 @@ export function renderColumn(
         }
         floorZ = top;
         floorMat = target.spanCapMaterial(mapX, mapY, i);
-        if (top > eyeZ) {
-          // bryla przecina poziom oka — w szybkiej sciezce za nia nie widac nic.
-          // W trybie maski to nieprawda: obok bryly moze byc otwarte przejscie,
-          // wiec o koncu kolumny decyduje wylacznie zapelnienie maski.
-          blocked = 1;
-          break;
-        }
       }
 
       // --- front gorny: sufity i spody mostow, lustrzane odbicie petli wyzej ---
@@ -862,7 +892,7 @@ export function renderColumn(
                 FACE_CEIL;
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
               if (lum < capM.minLum) {
-                if (skyM !== undefined && capLight > 0 && skyLum >= skyM.minLum) {
+                if (skyM !== undefined && capLight >= SKY_OPEN && skyLum >= skyM.minLum) {
                   skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
                 }
                 continue;
@@ -893,7 +923,7 @@ export function renderColumn(
                 // z niebem — bez tego odległy grzbiet wycina w niebie czarną dziurę.
                 // Pod ziemią `faceAccess` jest zerem i zostaje czerń, więc test
                 // ciemności trzyma się bez zmian.
-                if (skyM !== undefined && faceAccess > 0 && skyLum >= skyM.minLum) {
+                if (skyM !== undefined && faceAccess >= SKY_OPEN && skyLum >= skyM.minLum) {
                   skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
                 }
                 continue;
@@ -948,9 +978,8 @@ export function renderColumn(
 
     if (masked === 1) {
       if (coveredCount >= rows) break; // maska pelna — nic juz nie dojdzie
-    } else {
-      if (blocked === 1) break;
-      if (hiRow + 1 >= loRow) break; // ekran w tej kolumnie zapelniony
+    } else if (hiRow + 1 >= loRow) {
+      break; // ekran w tej kolumnie zapelniony
     }
   }
 
@@ -964,7 +993,7 @@ export function renderColumn(
   // znaczy, że promień całą drogę szedł pod stropem — wtedy „nic nie trafiłem" jest
   // dziurą w geometrii albo krawędzią wczytanego świata, a nie widokiem na niebo.
   // Bez tego warunku w komorze lochu pojawiało się szesnaście gwiazd.
-  if (skyM !== undefined && skyLum >= skyM.minLum && carryAccess > 0) {
+  if (skyM !== undefined && skyLum >= skyM.minLum && carryAccess >= SKY_OPEN) {
     for (row = 0; row < rows; row++) {
       covered = masked === 1 ? cover[row] ?? 0 : row <= hiRow || row >= loRow ? 1 : 0;
       if (covered === 1) continue;
