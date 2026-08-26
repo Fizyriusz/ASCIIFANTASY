@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { renderWorld, blit, MAX_HITS, Screen } from '@rpg/core';
+import { renderWorld, blit, createLightRig, pack15, staticLum, MAX_HITS, Screen } from '@rpg/core';
 import type { Camera, RenderContext } from '@rpg/core';
 import type { SpanGrid } from '@rpg/world';
+import { neonPack } from '@rpg/content';
 import { FakeCtx } from './fakeCtx.js';
 import { assertSnapshot } from './snapshot.js';
 import {
@@ -14,6 +15,8 @@ import {
   referenceContext,
   referenceScreen,
 } from './scene.js';
+
+const LF = String.fromCharCode(10);
 
 function renderText(grid: SpanGrid, cam: Camera): string {
   const screen = referenceScreen();
@@ -48,11 +51,16 @@ describe('renderWorld — snapshoty', () => {
     assertSnapshot('interior', renderText(s.grid, s.camera));
   });
 
-  it('empty: pusta siatka daje czysty ekran', () => {
+  it('empty: pusta siatka daje samo niebo', () => {
+    // Do M2 włącznie pusty ekran znaczył „nic nie trafiłem". Od chwili, gdy niebo
+    // jest powierzchnią, ten sam warunek brzmi: jedyne glify w kadrze pochodzą
+    // z rampy nieba. Gdyby wsiąkła tu jakakolwiek geometria, wpadnie inny znak.
     const s = emptyScene();
     const text = renderText(s.grid, s.camera);
     assertSnapshot('empty', text);
-    expect(text.trim()).toBe('');
+    for (const ch of text) {
+      expect(ch === ' ' || ch === '.' || ch === LF).toBe(true);
+    }
   });
 });
 
@@ -70,12 +78,24 @@ describe('renderWorld — własności', () => {
     const screen = referenceScreen();
     renderWorld(s.grid, s.camera, screen, referenceContext());
     const mid = Math.floor(screen.cols / 2);
+    // Niebo nie jest już pustką, tylko powierzchnią, więc rozpoznajemy je po kolorze:
+    // materiał nieba ma własną barwę i stałą jasność w całym kadrze.
+    const skyDef = neonPack.materials[neonPack.skyMaterial];
+    const rig = createLightRig();
+    rig.ambient = 0.3;
+    let skyLum = staticLum(rig, 15, 15);
+    skyLum += (1 - skyLum) * (skyDef?.emissive ?? 0);
+    const skyColor = pack15(
+      (skyDef?.r ?? 0) * skyLum,
+      (skyDef?.g ?? 0) * skyLum,
+      (skyDef?.b ?? 0) * skyLum,
+    );
     let sky = 0;
     let deck = 0;
     let road = 0;
     for (let row = 0; row < screen.rows; row++) {
-      const ch = screen.chars[row * screen.cols + mid] ?? 0;
-      if (ch === 0) sky++;
+      const i = row * screen.cols + mid;
+      if ((screen.colors[i] ?? 0) === skyColor) sky++;
       else if (row < screen.rows / 2) deck++;
       else road++;
     }
@@ -93,6 +113,8 @@ describe('renderWorld — własności', () => {
     for (let row = 0; row < screen.rows; row++) {
       if ((screen.chars[row * screen.cols + mid] ?? 0) === 0) empty++;
     }
+    // Pod stropem nie ma dostępu do nieba, więc nie ma też ani jednej komórki
+    // nieba — a że strop jest malowany, nie ma również komórek pustych.
     expect(empty).toBe(0);
   });
 

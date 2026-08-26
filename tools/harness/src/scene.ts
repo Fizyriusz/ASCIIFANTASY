@@ -70,7 +70,12 @@ export function referenceScreen(): Screen {
   return new Screen(REFERENCE.cols, REFERENCE.rows);
 }
 
-function context(materials: readonly Material[], maxDepth: number, fogDist: number): RenderContext {
+function context(
+  materials: readonly Material[],
+  maxDepth: number,
+  fogDist: number,
+  skyMaterial: number,
+): RenderContext {
   return createRenderContext(materials, {
     cellW: CELL_W,
     cellH: CELL_H,
@@ -78,6 +83,7 @@ function context(materials: readonly Material[], maxDepth: number, fogDist: numb
     maxDepth,
     fogDist,
     ambient: 0.3,
+    skyMaterial,
   });
 }
 
@@ -86,7 +92,7 @@ function context(materials: readonly Material[], maxDepth: number, fogDist: numb
  * bajta i nie ruszamy ich przy strojeniu pustkowia.
  */
 export function referenceContext(): RenderContext {
-  return context(neonMaterials, 64, 90);
+  return context(neonMaterials, 64, 90, neonPack.skyMaterial);
 }
 
 /**
@@ -94,7 +100,7 @@ export function referenceContext(): RenderContext {
  * a nie osobno dostrojoną scenę testową.
  */
 export function wildContext(): RenderContext {
-  return context(wildMaterials, 200, 220);
+  return context(wildMaterials, 200, 220, wildPack.skyMaterial);
 }
 
 export function referenceCity(): SpanGrid {
@@ -234,7 +240,7 @@ export function wildScene(view: keyof typeof WILD_VIEWS): { store: ChunkStore; c
  * a „odrobina światła dla wygody" kasuje ją w całości.
  */
 export function darkContext(): RenderContext {
-  const ctx = context(wildMaterials, 200, 220);
+  const ctx = context(wildMaterials, 200, 220, wildPack.skyMaterial);
   ctx.light.daylight = wildPack.light.daylightNight;
   return ctx;
 }
@@ -265,6 +271,12 @@ export const DUNGEON_VIEWS = {
   room: { x: -222.5, y: -443.5, yaw: 0, pitch: 0 },
   /** długi prosty korytarz: widać, gdzie kończy się zasięg pochodni */
   torch: { x: -155.5, y: -440.5, yaw: Math.PI / 2, pitch: -0.1 },
+  /**
+   * Piętnaście metrów w głąb tunelu, twarzą do wylotu, w dzień. Scena kontrolna
+   * nieba: wylot ma być **najjaśniejszym** obszarem kadru, bo po tym gracz
+   * znajduje drogę powrotną. Do M2 włącznie był czarnym prostokątem.
+   */
+  exit: { x: -166.5, y: -426.5, yaw: Math.PI, pitch: 0 },
   /**
    * Wejście z trzydziestu metrów, w dzień. Scena kontrolna punktu orientacyjnego:
    * bez skalnego obrzeża i brył łuku wcięcie jest z tej odległości ciemną plamą

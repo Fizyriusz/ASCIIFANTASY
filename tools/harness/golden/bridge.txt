@@ -1,28 +1,28 @@
-
-
-
-
-
-
-
-
+ .  .    .                 .   .  .         .        .              ...  .  .    .. .          . .      .      . .  .   ..      . .    ..     . ..
+          .    .   .          .      ..       .  .      .        .                   .             .            . .     ..   . .   .  ....  ..   ..
+        .  .  .   .   .  .  .  ..  ..        . .  .           .        . ..      .  ..     .    .       .   .  .          .    .         .
+.       . .     . .    .  .        . ..    . .    .          .  . .        .       .  .    .        .   .  .                     . .  .        ..   .
+  .              . . . .    .  .  .    . .     .   .. .              . . .   .  ..  .      ..                   ..  .          .       .
+ .          . ..     . .      ..    .     .    ..    .       .      .    .       ... .     .   .      ..   .       ..  .  .     . .      .  .  .
+ .  .  .    .....     .          .         .   .   .         . .     .          .    . . .            . ...   ..   .   .     . .   .          .   .
+      .        .    .   .  .              ....     .        .    .         . .  . . .           .     . . .       .   .. .   .    . .    . . .
 =======================================---------===========================+++++++++=========+++++++++===========================---------+++++++++===
 =======================================---------===========================+++++++++=========+++++++++===========================---------+++++++++===
 =======================================---------===========================+++++++++=========+++++++++===========================---------+++++++++===
-HHHHHH      HHHHHHHHH         HHHHHHH           BBBB        BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB        BBBB           BBBBBBB         HHHHHHHHH      HHHHHH
-HHHHHH           HHHH             HHH             BB        BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB        BB             BBB             HHHH           HHHHHH
-HHHHH                                                       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                                                       HHHHH
-HHHHH                                                       HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH                                                       BBBBB
-HHHHH                                                       HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH                                                       BBBBB
-HHHHH                                                       HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH                                                       HHHHH
-HHHHH                                                       HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH                                                       HHHHH
-HHHHH                                                       HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH                                                       HHHHH
-HHHHH                                                       HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH                                                       HHHHH
-HHHHH                                                       HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH                                                       HHHHH
-=====                                                       ==============================                                                       =====
-     ==++                                                 ===                            *==                                                 ====
-     ==++                                                 ===                            *==                                                 ====
-     ==++                                                 ===                            *==                                                 ====
+HHHHHH  .   HHHHHHHHH .       HHHHHHH   .     . BBBB.   . ..BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.   ..  BBBB .. . .  . BBBBBBB  .      HHHHHHHHH .   .HHHHHH
+HHHHHH    .  . ..HHHH. .      . . HHH   ...     ..BB   ..   BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB .      BB.     . .  . BBB      . .   .HHHH.    .     HHHHHH
+HHHHH      . .       ..  .       .    .          .. .       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                 .   .    ..     .     .  ..   .  .... HHHHH
+HHHHH    ..   . .              . .    ...          . ..     HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH  . ..  .   .    .. .  . . .             .  ..    .   .BBBBB
+HHHHH .   .  .      .        .        .       .     .      .HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH.     .       ..   .  .        .      .          . . . BBBBB
+HHHHH    .  ..  .          .  .  .         . .      ..  .   HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH            .               ....     .   .         .  .HHHHH
+HHHHH . . .. .                    .   . .   .   . .   .     HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH ..  . .     . .  .         ..   .  ...   . .        . HHHHH
+HHHHH  .   ...     ...       .      .     .       .   .  . .HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH.       .. .   ...    .. .   . .  . .        .    .    HHHHH
+HHHHH.    . .  .      .        ...... .  .      .   .   .   HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH     .      .    .   .    .     .  .. .        . ..    HHHHH
+HHHHH.     . .   .                   .    .       .       . HHHHHHHHHHHHHHHHHHHHHHHHHHHHHH.    .      ..       .            . .      .  ..  . .  HHHHH
+=====                     .    .      . .  ...       .     .==============================    .  .     .            .  .      . .          .    .=====
+  . .==++   .                   .      .      . ..  . ..  ===  .  .       .      . .     *==               . . . . .    . .                  ====. . .
+     ==++.                    ..   .          . .   . ... ===   ..            .          *==  .    .     .   ..   .      .           .  .  . ====   .
+     ==++    .    . . . ... .   .  ..              .  ..  ===                     .    ..*==        .           .   . .  ..             .  . ====
 ------------------------------------------------------------------------------------------------------------------------------------------------------
 ======================================================================================================================================================
 ======================================================================================================================================================

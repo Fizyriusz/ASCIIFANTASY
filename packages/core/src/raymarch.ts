@@ -47,7 +47,7 @@ import type { Screen } from './screen.js';
 import type { Material } from './materials.js';
 import { materialGlyph } from './materials.js';
 import type { LightRig } from './light.js';
-import { createLightRig, lightAt } from './light.js';
+import { createLightRig, lightAt, staticLum } from './light.js';
 import { shade } from './color.js';
 
 export interface Camera {
@@ -126,6 +126,15 @@ export interface RenderContext {
    * w poszukiwaniu otworu, którego w tej paczce nie ma. Dwadzieścia porównań
    * na klatkę zamiast półtora na komórkę.
    */
+  /**
+   * Materiał malowany tam, gdzie promień nie trafił w nic.
+   *
+   * Niebo jest powierzchnią, nie brakiem powierzchni: bez tego wylot jaskini
+   * oglądany z wnętrza jest czarnym prostokątem, którego nie da się odróżnić
+   * od ściany, i gracz nie ma po czym trafić do wyjścia. `-1` zostawia kolumny
+   * puste — tak zachowywał się renderer do M2 włącznie.
+   */
+  skyMaterial: number;
   hasOpenings: number;
   /**
    * Ile kolumn tej klatki poszło ścieżką maski pokrycia. Diagnostyka, nie stan:
@@ -176,6 +185,8 @@ export interface RenderContext {
 }
 
 export interface RenderOptions {
+  /** indeks materiału nieba w tablicy materiałów; -1 wyłącza malowanie nieba */
+  skyMaterial?: number;
   maxDepth?: number;
   maxSteps?: number;
   metersPerCell?: number;
@@ -187,6 +198,42 @@ export interface RenderOptions {
 
 /** Sentynel "brak powierzchni" — rzut wypada poza ekranem, więc pasek wychodzi pusty. */
 const NO_SURFACE = 1e6;
+
+/**
+ * Skala kratki hasza nieba i jej rzutowany rozmiar.
+ *
+ * Niebo jest hashowane po **kierunku patrzenia**, nie po pozycji: gwiazda ma stać
+ * w miejscu, kiedy gracz idzie, i obracać się razem z kadrem, kiedy się rozgląda.
+ * Sześćdziesiątka daje mniej więcej trzy kolumny ekranu na komórkę kratki przy
+ * polu widzenia 74° — na tyle rzadko, żeby gwiazdy nie zlewały się w płachtę.
+ */
+const SKY_SCALE = 200;
+const SKY_FOOT = 0.5;
+
+/**
+ * Maluje jeden wiersz nieba. Hash idzie po **kierunku patrzenia**, nie po pozycji
+ * kamery ani po wierszu ekranu: gwiazda stoi w miejscu, gdy gracz idzie, i obraca
+ * się razem z kadrem, gdy się rozgląda.
+ */
+function skyCell(
+  screen: Screen,
+  col: number,
+  row: number,
+  m: Material,
+  lum: number,
+  rdx: number,
+  rdy: number,
+  horizon: number,
+  kv: number,
+): void {
+  const elev = (horizon - (row + 0.5)) / kv;
+  screen.putUnsafe(
+    col,
+    row,
+    materialGlyph(m, lum, rdx * SKY_SCALE, rdy * SKY_SCALE, elev * SKY_SCALE, SKY_FOOT),
+    shade(m.r, m.g, m.b, lum),
+  );
+}
 
 /**
  * Próg malowania jest **per materiał** (`Material.minLum`), nie globalny.
@@ -208,6 +255,7 @@ export function createRenderContext(
     materials,
     // domyślnie zachowawczo: `renderWorld` przelicza to na każdej klatce, ale
     // `renderColumn` wołane samodzielnie nie ma kiedy
+    skyMaterial: opts?.skyMaterial ?? -1,
     hasOpenings: 1,
     maskedColumns: 0,
     hits: createColumnHits(),
@@ -433,11 +481,20 @@ export function renderColumn(
   let lum = 0;
   let capXm = 0;
   let capYm = 0;
+  let skyM: Material | undefined;
+  let skyLum = 0;
+  let covered = 0;
   let wallM: Material | undefined;
   let capM: Material | undefined;
   let probe: Material | undefined;
 
   hits.count = 0;
+
+  // Niebo jest w nieskonczonosci: bez mgly, bez tlumienia odlegloscia, z pelnym
+  // dostepem do nieba. Pora doby wchodzi ta sama funkcja co dla powierzchni.
+  skyM = ctx.skyMaterial >= 0 ? materials[ctx.skyMaterial] : undefined;
+  skyLum = staticLum(rig, 15, 15);
+  if (skyM !== undefined && skyM.emissive > 0) skyLum += (1 - skyLum) * skyM.emissive;
 
   // Pierwszy krok nie ma poprzedniej iteracji, więc jedyny lookup „wstecz"
   // w całym marszu dotyczy komórki kamery.
@@ -597,7 +654,16 @@ export function renderColumn(
               zRow = eyeZ + (horizon - (row + 0.5)) * distM / kv;
               lum = lightAt(rig, hitXm, hitYm, zRow, surfaceLight, faceAccess) * fog * face;
               if (wallM.emissive > 0) lum += (1 - lum) * wallM.emissive;
-              if (lum < wallM.minLum) continue;
+              if (lum < wallM.minLum) {
+                // Powierzchnia zgaszona przez mgłę nie jest czarna, tylko zlewa się
+                // z niebem — bez tego odległy grzbiet wycina w niebie czarną dziurę.
+                // Pod ziemią `faceAccess` jest zerem i zostaje czerń, więc test
+                // ciemności trzyma się bez zmian.
+                if (skyM !== undefined && faceAccess > 0 && skyLum >= skyM.minLum) {
+                  skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+                }
+                continue;
+              }
               screen.putUnsafe(
                 col,
                 row,
@@ -631,7 +697,12 @@ export function renderColumn(
               capYm = (cam.y + rdy * dCapCells) * mpc;
               lum = lightAt(rig, capXm, capYm, capZ, surfaceLight, capLight) * Math.exp(-dCapM / fogDist);
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
-              if (lum < capM.minLum) continue;
+              if (lum < capM.minLum) {
+                if (skyM !== undefined && capLight > 0 && skyLum >= skyM.minLum) {
+                  skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+                }
+                continue;
+              }
               // czapka jest pozioma, wiec w glab rozciaga sie duzo mocniej niz
               // w poprzek: przy horyzoncie jeden wiersz to dziesiatki metrow
               capFoot = dCapM / den;
@@ -718,6 +789,23 @@ export function renderColumn(
           if (wallStart < r0) wallStart = r0;
 
           capM = materials[capMat];
+          if (capM === undefined || capZ >= NO_SURFACE) {
+            // Nad glowa nie ma sufitu, wiec „czapka" gornego frontu nie istnieje —
+            // nad krawedzia bryly jest po prostu niebo. Front i tak zamknie te
+            // wiersze za chwile, wiec malujemy je tutaj; inaczej zostana czarne
+            // i w kadrze robi sie dziura w niebie w ksztalcie dalekiej korony.
+            if (skyM !== undefined && skyLum >= skyM.minLum && faceAccess > 0) {
+              wallEnd = wallStart - 1 < r1 ? wallStart - 1 : r1;
+              for (row = r0; row <= wallEnd; row++) {
+                if (masked === 1) {
+                  if (cover[row] === 1) continue;
+                  cover[row] = 1;
+                  coveredCount++;
+                }
+                skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+              }
+            }
+          }
           if (capM !== undefined && capZ < NO_SURFACE) {
             wallEnd = wallStart - 1 < r1 ? wallStart - 1 : r1;
             for (row = r0; row <= wallEnd; row++) {
@@ -736,7 +824,12 @@ export function renderColumn(
               capYm = (cam.y + rdy * dCapCells) * mpc;
               lum = lightAt(rig, capXm, capYm, capZ, surfaceLight, capLight) * Math.exp(-dCapM / fogDist);
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
-              if (lum < capM.minLum) continue;
+              if (lum < capM.minLum) {
+                if (skyM !== undefined && capLight > 0 && skyLum >= skyM.minLum) {
+                  skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+                }
+                continue;
+              }
               capFoot = dCapM / den;
               if (dCapM / kh > capFoot) capFoot = dCapM / kh;
               screen.putUnsafe(
@@ -758,7 +851,16 @@ export function renderColumn(
               zRow = eyeZ + (horizon - (row + 0.5)) * distM / kv;
               lum = lightAt(rig, hitXm, hitYm, zRow, surfaceLight, faceAccess) * fog * face;
               if (wallM.emissive > 0) lum += (1 - lum) * wallM.emissive;
-              if (lum < wallM.minLum) continue;
+              if (lum < wallM.minLum) {
+                // Powierzchnia zgaszona przez mgłę nie jest czarna, tylko zlewa się
+                // z niebem — bez tego odległy grzbiet wycina w niebie czarną dziurę.
+                // Pod ziemią `faceAccess` jest zerem i zostaje czerń, więc test
+                // ciemności trzyma się bez zmian.
+                if (skyM !== undefined && faceAccess > 0 && skyLum >= skyM.minLum) {
+                  skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+                }
+                continue;
+              }
               screen.putUnsafe(
                 col,
                 row,
@@ -812,6 +914,24 @@ export function renderColumn(
     } else {
       if (blocked === 1) break;
       if (hiRow + 1 >= loRow) break; // ekran w tej kolumnie zapelniony
+    }
+  }
+
+  // --- niebo: wiersze, w ktore nie trafila zadna geometria ---
+  //
+  // Kryterium jest geometryczne, nie kolorystyczne: fronty i maska zaznaczaja
+  // pokrycie takze wtedy, gdy powierzchnia byla za ciemna, zeby ja namalowac.
+  // Dzieki temu sciana lochu ponizej progu widocznosci zostaje **czarna**,
+  // a nie zamieniona w niebo — test ciemnosci z M2 nadal ma sens.
+  // `carryAccess` to dostęp do nieba komórki, w której marsz się skończył. Zero
+  // znaczy, że promień całą drogę szedł pod stropem — wtedy „nic nie trafiłem" jest
+  // dziurą w geometrii albo krawędzią wczytanego świata, a nie widokiem na niebo.
+  // Bez tego warunku w komorze lochu pojawiało się szesnaście gwiazd.
+  if (skyM !== undefined && skyLum >= skyM.minLum && carryAccess > 0) {
+    for (row = 0; row < rows; row++) {
+      covered = masked === 1 ? cover[row] ?? 0 : row <= hiRow || row >= loRow ? 1 : 0;
+      if (covered === 1) continue;
+      skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
     }
   }
 }

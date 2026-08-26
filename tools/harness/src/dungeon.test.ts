@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { compileMaterials, renderWorld } from '@rpg/core';
-import { wildPack } from '@rpg/content';
+import { inkOf, wildPack } from '@rpg/content';
 import {
   CHUNK_SIZE,
   ChunkStore,
@@ -53,6 +53,14 @@ describe('podziemia — snapshoty', () => {
     const screen = referenceScreen();
     renderWorld(s.store, s.camera, screen, s.ctx);
     assertSnapshot('cave-mouth', screen.toText());
+  });
+
+  it('cave-exit-from-inside: wylot tunelu widziany z piętnastu metrów', () => {
+    const s = dungeonScene('exit');
+    s.ctx.light.daylight = wildPack.light.daylightDay;
+    const screen = referenceScreen();
+    renderWorld(s.store, s.camera, screen, s.ctx);
+    assertSnapshot('cave-exit-from-inside', screen.toText());
   });
 
   it('cave-approach: wejście z trzydziestu metrów, w dzień', () => {
@@ -270,6 +278,46 @@ describe('spójność lochu', () => {
       if (c > max) max = c;
     }
     expect(max).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('wyjście z lochu', () => {
+  it('wylot jest najjaśniejszym obszarem kadru', () => {
+    // Kryterium odbioru nieba. Jasność bierzemy z **koloru**, nie z glifu: blit
+    // maluje 15-bitową barwę i to ona decyduje, co gracz widzi jako światło.
+    const s = dungeonScene('exit');
+    s.ctx.light.daylight = wildPack.light.daylightDay;
+    const screen = referenceScreen();
+    renderWorld(s.store, s.camera, screen, s.ctx);
+
+    const W = 12;
+    const H = 6;
+    let best = -1;
+    let bestCol = -1;
+    let bestRow = -1;
+    for (let r = 0; r + H <= screen.rows; r += 2) {
+      for (let c = 0; c + W <= screen.cols; c += 2) {
+        let sum = 0;
+        for (let y = r; y < r + H; y++) {
+          for (let x = c; x < c + W; x++) {
+            const i = y * screen.cols + x;
+            const p = screen.colors[i] ?? 0;
+            // jasność ważona atramentem: o czytelności decyduje barwa **razy**
+            // pokrycie glifu, nie sama barwa (lekcja z M1c)
+            const rgb = ((p >> 10) & 31) + ((p >> 5) & 31) + (p & 31);
+            sum += rgb * inkOf(screen.chars[i] ?? 32);
+          }
+        }
+        if (sum > best) {
+          best = sum;
+          bestCol = c;
+          bestRow = r;
+        }
+      }
+    }
+    // wylot jest na wprost, więc najjaśniejsze okno musi wypaść w środku kadru
+    expect(Math.abs(bestCol + W / 2 - screen.cols / 2)).toBeLessThan(screen.cols * 0.2);
+    expect(Math.abs(bestRow + H / 2 - screen.rows / 2)).toBeLessThan(screen.rows * 0.35);
   });
 });
 

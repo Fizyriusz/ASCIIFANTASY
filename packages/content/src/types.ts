@@ -131,6 +131,16 @@ export interface ContentPack {
    * w morzu to ta sama substancja, a biom opisuje brzeg, nie ciecz.
    */
   waterMaterial: MaterialIndex;
+  /**
+   * Materiał **nieba**: komórka, w którą nie trafiła żadna geometria.
+   *
+   * Niebo jest powierzchnią, nie brakiem powierzchni. Bez niego wylot jaskini
+   * oglądany od środka jest czarnym prostokątem nie do odróżnienia od ściany —
+   * w południe. Rampa robi robotę pory doby sama: pasmo jasne to dzień (glif
+   * jednolity, zero szumu, więc niebo nie migocze przy obrocie), pasmo ciemne
+   * ma w rampie spacje i wychodzą z tego rzadkie gwiazdy.
+   */
+  skyMaterial: MaterialIndex;
   light: LightDef;
   underground: UndergroundDef;
 }

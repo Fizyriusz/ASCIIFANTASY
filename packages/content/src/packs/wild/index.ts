@@ -41,6 +41,7 @@ export const WildMat = {
   Window: 17,
   /** żagiew: świeci własnym światłem i jest źródłem dla oświetlenia dynamicznego */
   Torch: 18,
+  Sky: 19,
 } as const;
 
 export type WildMat = (typeof WildMat)[keyof typeof WildMat];
@@ -92,6 +93,13 @@ const materials: readonly MaterialDef[] = [
   { id: 'doorway', bright: ' ', mid: ' ', dark: ' ', r: 0, g: 0, b: 0, roughness: 0, emissive: 0, transparent: true },
   { id: 'window', bright: ' ', mid: ' ', dark: ' ', r: 0, g: 0, b: 0, roughness: 0, emissive: 0, transparent: true },
   { id: 'torch', bright: '*@', mid: '+o', dark: '.', r: 255, g: 208, b: 130, roughness: 0.3, emissive: 1 },
+  // Niebo. Rampa robi całą pracę pory doby: dzień to `%` (gęsty atrament, więc
+  // niebo jest **jasne**, a nie tylko jasnego koloru — o czytelności decyduje
+  // pokrycie atramentem razy barwa, patrz INK_COVERAGE), zmierzch `:`, noc to
+  // kropki i spacje, czyli rzadkie gwiazdy. Każde pasmo ma jeden glif, więc niebo
+  // nie migocze przy obrocie kamery. `emissive` trzyma noc tuż nad progiem
+  // widoczności — inaczej gwiazdy gasną razem ze słońcem.
+  { id: 'sky', bright: '%', mid: ':', dark: '.  ', r: 150, g: 182, b: 216, roughness: 0.5, emissive: 0.06 },
 ];
 
 /**
@@ -265,6 +273,7 @@ const underground: UndergroundDef = {
 export const wildPack: ContentPack = {
   id: 'wild',
   materials,
+  skyMaterial: WildMat.Sky,
   biomes,
   props,
   waterMaterial: WildMat.Water,

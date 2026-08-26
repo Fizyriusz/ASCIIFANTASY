@@ -92,6 +92,7 @@ const render = createRenderContext(compileMaterials(wildPack.materials), {
   maxDepth: 200,
   fogDist: 220,
   ambient: 0.3,
+  skyMaterial: wildPack.skyMaterial,
 });
 render.light.torchRadius = wildPack.light.torchRadius;
 render.light.torchPower = wildPack.light.torchPower;

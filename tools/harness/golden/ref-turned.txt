@@ -1,13 +1,13 @@
-            ##  888|#||||||||||||######8888888oo--------o888888888888888oooo--------ooooooooo----oooooooo--oooooo=====****====++++***#&&&&&&&&#####*==
+   .        ##. 888|#||||||||||||######8888888oo--------o888888888888888oooo--------ooooooooo----oooooooo--oooooo=====****====++++***#&&&&&&&&#####*==
             ## 8888||||||||||||||######8888888oo--------o888888888888888ooooooooo---oooooooooooo-oooooooooooooooo=====****+++=++++***#&&###########**+
-            ##B8O88||||||||||||||######8888888oo--------o888888888888888ooooooooooooooooooooooooooooooooooooooooo=====****++++=+++***%#############**+
-            ##BOO8O||||||||||||||######8888888oooooo----o888888888888888oooooooooooooooooooooooooooo====ooooooooo=====****++++====***%##########%%%**+
-            ##OOO8O|##|||||||||||######8888888oooooooooo-888888888888888oooooooooooooooooooooooooooo====ooo-ooooo=====****++++====+++%###%%%%%%%%%%***
-            ##OOO8O|##|||||||||||######8888888oooooooooo-888888888888888oooooo==oooooooooooooooooooo====ooo---ooo========*++++====+++&%%%%%%%%%%%%%***
-      o     ##OOO8B|##|||||||||||####||8888888oooooooooo-888888888888888oooooo=======ooooooooooooooo====ooo---ooo============+====+++&%%%%%%%%%%%%%***
-    | o     ##OOO8B|##|||||||||||##||||8888888oooooooooo-888888888888888oooooo==========oooooooooooo====ooo---ooo=============++==+++&%%%%%%#######==*
-   || o#    ##OBB8B###|||||||||||##||||8888888oooooooooo-BBB888888888888oooooo==========oooooooooooo====oooooo=oo=============+++++++&%%%%%%#######===
-   || o#o---##BBB8B###|||||||||||##||||8888888oo-----ooo-BBB888888888888oooooo==========oooooooooooo====oooooo================+++++++&%%%%%%#######===
+..  .      .##B8O88||||||||||||||######8888888oo--------o888888888888888ooooooooooooooooooooooooooooooooooooooooo=====****++++=+++***%#############**+
+      .     ##BOO8O||||||||||||||######8888888oooooo----o888888888888888oooooooooooooooooooooooooooo====ooooooooo=====****++++====***%##########%%%**+
+  .    .    ##OOO8O|##|||||||||||######8888888oooooooooo-888888888888888oooooooooooooooooooooooooooo====ooo-ooooo=====****++++====+++%###%%%%%%%%%%***
+  ..       .##OOO8O|##|||||||||||######8888888oooooooooo-888888888888888oooooo==oooooooooooooooooooo====ooo---ooo========*++++====+++&%%%%%%%%%%%%%***
+     .o    .##OOO8B|##|||||||||||####||8888888oooooooooo-888888888888888oooooo=======ooooooooooooooo====ooo---ooo============+====+++&%%%%%%%%%%%%%***
+..  | o.    ##OOO8B|##|||||||||||##||||8888888oooooooooo-888888888888888oooooo==========oooooooooooo====ooo---ooo=============++==+++&%%%%%%#######==*
+   || o#.   ##OBB8B###|||||||||||##||||8888888oooooooooo-BBB888888888888oooooo==========oooooooooooo====oooooo=oo=============+++++++&%%%%%%#######===
+  .|| o#o---##BBB8B###|||||||||||##||||8888888oo-----ooo-BBB888888888888oooooo==========oooooooooooo====oooooo================+++++++&%%%%%%#######===
 oo || o#o---#=BBB8B##||||||||||||##||||8888888oo--------oBBB8888BBBB8888oooooooooooo-===oooooooooooooooooooooo========**======+++++++&%%%%%%#######**=
 oo || o#o---==BBB8B#||||||||-----##|||=8888888oo--------oBBB8888BBBB8888oooooooooooo----===ooooooooooooooooooo-=======****====+++++++##############**+
 -o |: o#o---==BBB8O#||||||||-----##====888888Ooo--------o8888888BBBB8888oooooooooooo----=====ooooooooooooooooo---=====****====+++++++##############**+

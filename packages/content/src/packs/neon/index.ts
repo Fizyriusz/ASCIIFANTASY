@@ -23,6 +23,7 @@ export const NeonMat = {
   Wood: 7,
   Metal: 8,
   Lamp: 9,
+  NightSky: 10,
 } as const;
 
 export type NeonMat = (typeof NeonMat)[keyof typeof NeonMat];
@@ -41,6 +42,11 @@ const materials: readonly MaterialDef[] = [
   { id: 'wood', bright: 'HB#', mid: '=+-', dark: ':.', r: 142, g: 96, b: 56, roughness: 0.65, emissive: 0 },
   { id: 'metal', bright: 'M8#', mid: '#=-', dark: ':.', r: 170, g: 175, b: 185, roughness: 0.45, emissive: 0 },
   { id: 'lamp', bright: '*@', mid: '+o', dark: '.', r: 255, g: 220, b: 140, roughness: 0.3, emissive: 1 },
+  // Niebo miasta jest nocne o każdej porze — paczka neon nie ma cyklu doby
+  // (`daylight` na sztywno 1). Rzadkość gwiazd bierze się więc z **rampy**,
+  // nie z jasności: jeden glif na siedem, reszta spacje, we wszystkich trzech
+  // pasmach. Gdyby rampa była gęsta, miasto dostałoby jednolitą płachtę kropek.
+  { id: 'nightsky', bright: '.      ', mid: '.      ', dark: '.      ', r: 165, g: 175, b: 210, roughness: 0.92, emissive: 0.09 },
 ];
 
 /**
@@ -76,6 +82,7 @@ const underground: UndergroundDef = {
 export const neonPack: ContentPack = {
   id: 'neon',
   materials,
+  skyMaterial: NeonMat.NightSky,
   biomes: [],
   props: [],
   waterMaterial: NeonMat.Water,
