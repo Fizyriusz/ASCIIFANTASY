@@ -155,13 +155,6 @@ export interface RenderContext {
    * by się nie dowiedział. Testy pilnują, żeby w scenach zewnętrznych było zero.
    */
   maskedColumns: number;
-  /**
-   * Ile kolumn tej klatki weszlo na maske **z powodu materialu przezroczystego**.
-   * Osobno od `maskedColumns`, bo renderer wchodzi na maske takze z powodow
-   * geometrycznych (bryla wiszaca pod golym niebem) i tego strażnik contentu
-   * nie ma prawa zliczac.
-   */
-  maskedOpenings: number;
   /** bufor trafień, którego renderWorld używa dla kolejnych kolumn */
   hits: ColumnHits;
   /** zasięg marszu w komórkach */
@@ -267,33 +260,6 @@ const SKY_FOOT = 0.5;
 const SKY_OPEN = 12;
 
 /**
- * Jedyne miejsce, w którym zapada decyzja „w tym wierszu widać niebo".
- *
- * Powód istnienia tej funkcji jest historyczny i wart zapamiętania: decyzja była
- * rozsiana po sześciu miejscach w kolumnie i **trzy razy z rzędu okazała się
- * błędna w innym z nich**. Dopóki warunek jest jeden, czwartego wariantu tego
- * samego objawu nie da się dodać przez nieuwagę.
- *
- * Warunek: materiał nieba istnieje, miejsce ma realny dostęp do nieba
- * (`SKY_OPEN`), a samo niebo jest w tej porze doby widoczne.
- */
-function skyIfOpen(
-  screen: Screen,
-  col: number,
-  row: number,
-  m: Material | undefined,
-  lum: number,
-  access: number,
-  rdx: number,
-  rdy: number,
-  horizon: number,
-  kv: number,
-): void {
-  if (m === undefined || access < SKY_OPEN || lum < m.minLum) return;
-  skyCell(screen, col, row, m, lum, rdx, rdy, horizon, kv);
-}
-
-/**
  * Maluje jeden wiersz nieba. Hash idzie po **kierunku patrzenia**, nie po pozycji
  * kamery ani po wierszu ekranu: gwiazda stoi w miejscu, gdy gracz idzie, i obraca
  * się razem z kadrem, gdy się rozgląda.
@@ -342,7 +308,6 @@ export function createRenderContext(
     forceMask: 0,
     hasOpenings: 1,
     maskedColumns: 0,
-    maskedOpenings: 0,
     hits: createColumnHits(),
     maxDepth: opts?.maxDepth ?? 96,
     maxSteps: opts?.maxSteps ?? 192,
@@ -402,7 +367,6 @@ export function renderWorld(
   }
   ctx.hasOpenings = openings;
   ctx.maskedColumns = 0;
-  ctx.maskedOpenings = 0;
 
   seedFrontiers(target, cam, ctx);
   // maska musi pomiescic caly ekran; realokacja tylko przy zmianie rozmiaru okna
@@ -515,16 +479,6 @@ export function renderColumn(
    */
   let masked = ctx.forceMask;
   let coveredCount = 0;
-  /**
-   * Okno wierszy, w ktorym maska ma jeszcze cokolwiek do zrobienia.
-   *
-   * Bez niego tryb maski maluje kazdy span przez caly ekran i sprawdza pokrycie
-   * wiersz po wierszu — a odkad na maske wchodza takze kolumny z korona drzewa,
-   * to jest domyslna sciezka na otwartym terenie, nie wyjatek. Zawezanie zakresu
-   * odtwarza to, co w szybkiej sciezce robi warunek `rFirst >= loRow`.
-   */
-  let maskTop = 0;
-  let maskBot = 0;
 
   let side = 0;
   let dist = 0;
@@ -589,8 +543,6 @@ export function renderColumn(
     // maska wymuszona z zewnatrz zaczyna kolumne z czystym pokryciem
     for (let r = 0; r < rows; r++) cover[r] = 0;
     coveredCount = 0;
-    maskTop = 0;
-    maskBot = rows - 1;
   }
 
   // Niebo jest w nieskonczonosci: bez mgly, bez tlumienia odlegloscia, z pelnym
@@ -687,17 +639,12 @@ export function renderColumn(
               if (row <= hiRow || row >= loRow) {
                 cover[row] = 1;
                 coveredCount++;
-                while (maskTop <= maskBot && cover[maskTop] === 1) maskTop++;
-                while (maskBot >= maskTop && cover[maskBot] === 1) maskBot--;
               } else {
                 cover[row] = 0;
               }
             }
             masked = 1;
-            maskTop = hiRow + 1 < 0 ? 0 : hiRow + 1;
-            maskBot = loRow - 1 > rows - 1 ? rows - 1 : loRow - 1;
             ctx.maskedColumns++;
-            ctx.maskedOpenings++;
             break;
           }
         }
@@ -733,8 +680,8 @@ export function renderColumn(
         if (masked === 0 && rFirst >= loRow) continue; // zasloniety w calosci
 
         if (masked === 1) {
-          r0 = rFirst < maskTop ? maskTop : rFirst;
-          r1 = maskBot;
+          r0 = rFirst < 0 ? 0 : rFirst;
+          r1 = rows - 1;
         } else {
           r0 = rFirst > hiRow + 1 ? rFirst : hiRow + 1;
           if (r0 < 0) r0 = 0;
@@ -771,8 +718,6 @@ export function renderColumn(
                 if (cover[row] === 1) continue;
                 cover[row] = 1;
                 coveredCount++;
-                while (maskTop <= maskBot && cover[maskTop] === 1) maskTop++;
-                while (maskBot >= maskTop && cover[maskBot] === 1) maskBot--;
               }
               zRow = eyeZ + (horizon - (row + 0.5)) * distM / kv;
               lum = lightAt(rig, hitXm, hitYm, zRow, surfaceLight, faceAccess) * fog * face;
@@ -782,7 +727,9 @@ export function renderColumn(
                 // z niebem — bez tego odległy grzbiet wycina w niebie czarną dziurę.
                 // Pod ziemią `faceAccess` jest zerem i zostaje czerń, więc test
                 // ciemności trzyma się bez zmian.
-                skyIfOpen(screen, col, row, skyM, skyLum, faceAccess, rdx, rdy, horizon, kv);
+                if (skyM !== undefined && faceAccess >= SKY_OPEN && skyLum >= skyM.minLum) {
+                  skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+                }
                 continue;
               }
               screen.putUnsafe(
@@ -812,8 +759,6 @@ export function renderColumn(
               if (masked === 1) {
                 cover[row] = 1;
                 coveredCount++;
-                while (maskTop <= maskBot && cover[maskTop] === 1) maskTop++;
-                while (maskBot >= maskTop && cover[maskBot] === 1) maskBot--;
               }
               dCapCells = dCapM * invMpc;
               capXm = (cam.x + rdx * dCapCells) * mpc;
@@ -824,7 +769,9 @@ export function renderColumn(
                 FACE_FLOOR;
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
               if (lum < capM.minLum) {
-                skyIfOpen(screen, col, row, skyM, skyLum, capLight, rdx, rdy, horizon, kv);
+                if (skyM !== undefined && capLight >= SKY_OPEN && skyLum >= skyM.minLum) {
+                  skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+                }
                 continue;
               }
               // czapka jest pozioma, wiec w glab rozciaga sie duzo mocniej niz
@@ -875,37 +822,11 @@ export function renderColumn(
         capAccess = faceAccess;
         rowSurf = horizon - (bottom - eyeZ) * kv * invDistM;
         rLast = Math.ceil(rowSurf - 0.5) - 1;
-
-        // Bryla **wiszaca pod golym niebem** — korona drzewa, przeslo mostu ogladane
-        // z dolu — zaslania wylacznie wlasny pas wierszy. Nad nia moze stac cos
-        // dalszego i wyzszego: drugie drzewo, gora za pagorkiem. Dwa fronty tego nie
-        // wyraza, bo `hiRow` mowi „zamalowane az dotad" i skasowaloby tamto dalsze.
-        // Kolumna przechodzi wiec na maske, tak samo jak przy otworze w scianie.
-        if (masked === 0 && ceilZ >= NO_SURFACE && rLast > hiRow) {
-          rowCap = horizon - (top - eyeZ) * kv * invDistM;
-          if (Math.ceil(rowCap - 0.5) > 0) {
-            for (row = 0; row < rows; row++) {
-              if (row <= hiRow || row >= loRow) {
-                cover[row] = 1;
-                coveredCount++;
-                while (maskTop <= maskBot && cover[maskTop] === 1) maskTop++;
-                while (maskBot >= maskTop && cover[maskBot] === 1) maskBot--;
-              } else {
-                cover[row] = 0;
-              }
-            }
-            masked = 1;
-            maskTop = hiRow + 1 < 0 ? 0 : hiRow + 1;
-            maskBot = loRow - 1 > rows - 1 ? rows - 1 : loRow - 1;
-            ctx.maskedColumns++;
-          }
-        }
-
         if (masked === 0 && rLast <= hiRow) continue; // zasloniety nad okiem
 
         if (masked === 1) {
-          r0 = maskTop;
-          r1 = rLast > maskBot ? maskBot : rLast;
+          r0 = 0;
+          r1 = rLast > rows - 1 ? rows - 1 : rLast;
         } else {
           r0 = hiRow + 1;
           if (r0 < 0) r0 = 0;
@@ -932,6 +853,23 @@ export function renderColumn(
           if (wallStart < r0) wallStart = r0;
 
           capM = materials[capMat];
+          if (capM === undefined || capZ >= NO_SURFACE) {
+            // Nad glowa nie ma sufitu, wiec „czapka" gornego frontu nie istnieje —
+            // nad krawedzia bryly jest po prostu niebo. Front i tak zamknie te
+            // wiersze za chwile, wiec malujemy je tutaj; inaczej zostana czarne
+            // i w kadrze robi sie dziura w niebie w ksztalcie dalekiej korony.
+            if (skyM !== undefined && skyLum >= skyM.minLum && faceAccess > 0) {
+              wallEnd = wallStart - 1 < r1 ? wallStart - 1 : r1;
+              for (row = r0; row <= wallEnd; row++) {
+                if (masked === 1) {
+                  if (cover[row] === 1) continue;
+                  cover[row] = 1;
+                  coveredCount++;
+                }
+                skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+              }
+            }
+          }
           if (capM !== undefined && capZ < NO_SURFACE) {
             wallEnd = wallStart - 1 < r1 ? wallStart - 1 : r1;
             for (row = r0; row <= wallEnd; row++) {
@@ -944,8 +882,6 @@ export function renderColumn(
               if (masked === 1) {
                 cover[row] = 1;
                 coveredCount++;
-                while (maskTop <= maskBot && cover[maskTop] === 1) maskTop++;
-                while (maskBot >= maskTop && cover[maskBot] === 1) maskBot--;
               }
               dCapCells = dCapM * invMpc;
               capXm = (cam.x + rdx * dCapCells) * mpc;
@@ -956,7 +892,9 @@ export function renderColumn(
                 FACE_CEIL;
               if (capM.emissive > 0) lum += (1 - lum) * capM.emissive;
               if (lum < capM.minLum) {
-                skyIfOpen(screen, col, row, skyM, skyLum, capLight, rdx, rdy, horizon, kv);
+                if (skyM !== undefined && capLight >= SKY_OPEN && skyLum >= skyM.minLum) {
+                  skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+                }
                 continue;
               }
               capFoot = dCapM / den;
@@ -976,8 +914,6 @@ export function renderColumn(
                 if (cover[row] === 1) continue;
                 cover[row] = 1;
                 coveredCount++;
-                while (maskTop <= maskBot && cover[maskTop] === 1) maskTop++;
-                while (maskBot >= maskTop && cover[maskBot] === 1) maskBot--;
               }
               zRow = eyeZ + (horizon - (row + 0.5)) * distM / kv;
               lum = lightAt(rig, hitXm, hitYm, zRow, surfaceLight, faceAccess) * fog * face;
@@ -987,7 +923,9 @@ export function renderColumn(
                 // z niebem — bez tego odległy grzbiet wycina w niebie czarną dziurę.
                 // Pod ziemią `faceAccess` jest zerem i zostaje czerń, więc test
                 // ciemności trzyma się bez zmian.
-                skyIfOpen(screen, col, row, skyM, skyLum, faceAccess, rdx, rdy, horizon, kv);
+                if (skyM !== undefined && faceAccess >= SKY_OPEN && skyLum >= skyM.minLum) {
+                  skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+                }
                 continue;
               }
               screen.putUnsafe(
@@ -1055,9 +993,11 @@ export function renderColumn(
   // znaczy, że promień całą drogę szedł pod stropem — wtedy „nic nie trafiłem" jest
   // dziurą w geometrii albo krawędzią wczytanego świata, a nie widokiem na niebo.
   // Bez tego warunku w komorze lochu pojawiało się szesnaście gwiazd.
-  for (row = 0; row < rows; row++) {
-    covered = masked === 1 ? cover[row] ?? 0 : row <= hiRow || row >= loRow ? 1 : 0;
-    if (covered === 1) continue;
-    skyIfOpen(screen, col, row, skyM, skyLum, carryAccess, rdx, rdy, horizon, kv);
+  if (skyM !== undefined && skyLum >= skyM.minLum && carryAccess >= SKY_OPEN) {
+    for (row = 0; row < rows; row++) {
+      covered = masked === 1 ? cover[row] ?? 0 : row <= hiRow || row >= loRow ? 1 : 0;
+      if (covered === 1) continue;
+      skyCell(screen, col, row, skyM, skyLum, rdx, rdy, horizon, kv);
+    }
   }
 }

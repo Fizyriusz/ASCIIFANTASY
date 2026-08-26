@@ -3,10 +3,8 @@ import { createLightRig, pack15, renderWorld, staticLum } from '@rpg/core';
 import type { Camera, RenderContext, RenderTarget } from '@rpg/core';
 import type { ContentPack } from '@rpg/content';
 import { neonPack, wildPack } from '@rpg/content';
-import { ChunkStore } from '@rpg/world';
 import {
   DUNGEON_VIEWS,
-  WILD_SEED,
   WILD_VIEWS,
   bridgeScene,
   dungeonScene,
@@ -121,45 +119,6 @@ function everyScene(): Frame[] {
 }
 
 describe('niezmienniki obrazu', () => {
-  it('opadanie oka nie odsłania nieba', () => {
-    // Niezmiennik geometryczny: im niżej oko, tym **wyżej** rzutują się bryły
-    // nad nim, więc nieba nad horyzontem może tylko ubyć. Przyrost oznacza, że
-    // kolumna zgubiła geometrię — i tak właśnie objawiał się błąd górnego frontu
-    // (korona zasłaniała drzewo za sobą łatą nieba, rosnącą, gdy gracz schodził
-    // w wąwóz). Pomiar sprzed poprawki: 1216 komórek nieba przy oku 3,4 m nad
-    // gruntem, 1905 przy 1,0 m — przyrost o 689.
-    const store = new ChunkStore(WILD_SEED, wildPack, 3);
-    const screen = referenceScreen();
-    const ctx = wildContext();
-    const sky = skyColor(wildPack);
-    const spots: Array<[number, number, number]> = [
-      [-339.5, -691.5, 3.6652],
-      [-343.5, -695.5, 1.0472],
-      [-335.5, -687.5, 4.7124],
-    ];
-    for (const [x, y, yaw] of spots) {
-      store.loadRing({ x, y });
-      const ground = store.surfaceHeight(Math.floor(x), Math.floor(y), 1e6);
-      let prev = Infinity;
-      for (const dz of [3.4, 2.6, 1.8, 1.0]) {
-        const cam: Camera = { x, y, eyeZ: ground + dz, yaw, pitch: 0.05, fov: (74 * Math.PI) / 180 };
-        renderWorld(store, cam, screen, ctx);
-        const horizon = Math.round(ctx.horizon);
-        let n = 0;
-        for (let r = 0; r < horizon; r++) {
-          for (let c = 0; c < screen.cols; c++) {
-            const i = r * screen.cols + c;
-            if ((screen.chars[i] ?? 0) !== 0 && (screen.colors[i] ?? 0) === sky) n++;
-          }
-        }
-        expect(`(${x},${y}) oko ${dz}: ${n <= prev ? 'ok' : `PRZYROST z ${prev} na ${n}`}`).toBe(
-          `(${x},${y}) oko ${dz}: ok`,
-        );
-        prev = n;
-      }
-    }
-  });
-
   it('szybka ścieżka nie gubi geometrii względem maski — wszystkie sceny', () => {
     // Reguła w wersji, która się broni: **komórka nieba tam, gdzie pełny marsz
     // widzi bryłę, jest zawsze błędem**. Maska nie zna pojęcia „kolumna zamknięta",

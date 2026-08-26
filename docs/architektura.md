@@ -537,6 +537,38 @@ w pionie między spanami tej samej komórki. Koszt pamięci: jeden bajt na span,
 czyli przy budżecie 1,3 spanu na komórkę mniej niż dzisiejsze `lights`. Zrobić
 **przed** M4, nie „przy okazji" M4 — inaczej wnętrza powstaną wokół ograniczenia.
 
+### 10.4 Górny front modeluje spód bryły jako nieskończony strop — spłata **przed M3**
+
+`renderColumn` traktuje każdy span nad okiem jak sufit: jego spód rzutuje floor-castem
+jako **płaszczyznę poziomą ciągnącą się nad graczem**, a `hiRow` zapisuje wszystkie
+wiersze nad nim jako zamalowane. Dla wnętrza to prawda. Dla korony drzewa, przęsła
+mostu i każdej innej bryły wiszącej — nie: korona zasłania własny pas wierszy i nic
+poza tym, a nad nią może stać drugie drzewo albo góra.
+
+Trzy zgłoszenia z rzędu w M2b to ten sam błąd w trzech przebraniach:
+- prostokątne łaty nieba na koronach, **rosnące, gdy oko opada** (pomiar: nieba nad
+  horyzontem 1216 komórek przy oku 3,4 m nad gruntem i 1905 przy 1,0 m);
+- „ciemna szachownica" zamiast tafli nieba, kiedy kolumny weszły na maskę: spód korony
+  stojącej 254 m dalej rozlewał się floor-castem na wiersze odległe o 25–43 m;
+- pień, który wpada w górny front, gdy oko zejdzie poniżej niego, przesuwa `hiRow`
+  poniżej wierszy własnej korony i korona przestaje się malować.
+
+Próba naprawy przez przełączanie takich kolumn na maskę pokrycia (commit 33166c9,
+wycofany) usuwa pierwszy objaw i odsłania drugi: maska nie ma ogranicznika `hiRow`,
+więc fałszywy strop dostaje cały ekran. Ograniczenie floor-castu warunkiem „wiersz nie
+może rzutować się bliżej niż komórka, do której należy" usuwa drugi i psuje trzeci.
+Wniosek: to nie jest łatka, tylko brakujący element modelu — górny front potrzebuje
+rozróżnienia **sufit / bryła wisząca** i osobnej reguły rzutowania dla każdego.
+
+Termin: **przed M3**, bo sprite'y potworów i łupu są dokładnie bryłami wiszącymi
+i wejdą w ten sam kod.
+
+Niezmiennik, który trzeba dodać razem z naprawą (sprawdzony, łapie wszystkie trzy
+warianty): dla tej samej kamery render szybką ścieżką i render z wymuszoną maską
+(`RenderContext.forceMask`) muszą dawać **identyczny bufor znaków i kolorów**. Maska
+przestaje wtedy być punktem odniesienia, a staje się drugą implementacją tej samej
+specyfikacji.
+
 ### 10.2 Kolizja nie zna `SpanFlags.Stairs` — spłata w **M3**, razem z fizyką
 
 Ruch gracza zna jeden próg: `STEP_UP = 0,6 m`. Schodów nie rozpoznaje, mimo że

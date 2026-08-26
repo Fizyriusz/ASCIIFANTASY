@@ -422,7 +422,7 @@ describe('otwory w kolumnie', () => {
       const s = wildScene(view);
       const ctx = wildContext();
       renderWorld(s.store, s.camera, screen, ctx);
-      expect(`${view}: ${ctx.maskedOpenings}`).toBe(`${view}: 0`);
+      expect(`${view}: ${ctx.maskedColumns}`).toBe(`${view}: 0`);
     }
   });
 
@@ -438,7 +438,7 @@ describe('otwory w kolumnie', () => {
     );
     const screen = referenceScreen();
     renderWorld(s.store, s.camera, screen, ctx);
-    expect(ctx.maskedOpenings).toBeGreaterThan(20);
+    expect(ctx.maskedColumns).toBeGreaterThan(20);
   });
 
   it('licznik kolumn z maską nie jest martwy', () => {
@@ -446,8 +446,8 @@ describe('otwory w kolumnie', () => {
     const s = hutScene('door');
     const screen = referenceScreen();
     renderWorld(s.store, s.camera, screen, s.ctx);
-    expect(s.ctx.maskedOpenings).toBeGreaterThan(10);
-    expect(s.ctx.maskedOpenings).toBeLessThan(screen.cols);
+    expect(s.ctx.maskedColumns).toBeGreaterThan(10);
+    expect(s.ctx.maskedColumns).toBeLessThan(screen.cols);
   });
 
   it('kolumna bez otworu nie płaci za maskę', () => {
