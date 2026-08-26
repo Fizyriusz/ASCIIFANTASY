@@ -11,7 +11,7 @@ import {
 } from '@rpg/core';
 import type { Camera } from '@rpg/core';
 import { wildPack } from '@rpg/content';
-import { CELL_METERS, ChunkStore } from '@rpg/world';
+import { CELL_METERS, ChunkStore, dungeonsNear } from '@rpg/world';
 
 /**
  * Punkt wejścia: pętla, wejście, sklejenie całości. Cała geometria siedzi
@@ -119,6 +119,56 @@ let eyeTarget = cam.eyeZ;
 let dayPhase = START_HOUR;
 let torchOn = true;
 
+/**
+ * Skok do najbliższego wejścia do jaskini i z powrotem — klawisz `G`.
+ *
+ * Afordancja testowa, nie mechanika: do najbliższego lochu jest z reguły kilkaset
+ * metrów, a sprawdzenie zmiany w oświetleniu podziemi nie może kosztować minuty
+ * biegu. Wraca tam, skąd skoczyłeś, więc nie gubi kontekstu.
+ */
+let jumpBack: { x: number; y: number; yaw: number } | null = null;
+
+function jumpToCave(): void {
+  if (jumpBack !== null) {
+    const back = jumpBack;
+    jumpBack = null;
+    land(back.x, back.y, back.yaw);
+    return;
+  }
+  // Pełny prostokąt POI wokół gracza; siatka lochów ma skok 512 komórek, więc
+  // ±1024 zawsze coś złapie, o ile w ogóle coś tam jest.
+  const graphs = dungeonsNear(SEED, cam.x - 1024, cam.y - 1024, cam.x + 1024, cam.y + 1024);
+  let best = null;
+  let bestD = Infinity;
+  for (const g of graphs) {
+    const d = (g.mouthX - cam.x) ** 2 + (g.mouthY - cam.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = g;
+    }
+  }
+  if (best === null) return;
+  jumpBack = { x: cam.x, y: cam.y, yaw: cam.yaw };
+  // kolano wcięcia: stoi się w wąwozie, twarzą do wylotu tunelu
+  land(
+    best.mouthX + best.mouthDirX * 4 + 0.5,
+    best.mouthY + best.mouthDirY * 4 + 0.5,
+    Math.atan2(-best.mouthDirY, -best.mouthDirX),
+  );
+}
+
+function land(x: number, y: number, yaw: number): void {
+  cam.x = x;
+  cam.y = y;
+  cam.yaw = yaw;
+  world.loadRing(cam);
+  const surf = world.surfaceHeight(Math.floor(x), Math.floor(y), 1e6);
+  if (Number.isFinite(surf)) {
+    eyeTarget = surf + PLAYER_EYE;
+    cam.eyeZ = eyeTarget;
+  }
+}
+
 function measure(fontPx: number, fontStack: string): number {
   if (!ctx) return fontPx * 0.6;
   ctx.font = `${fontPx}px ${fontStack}`;
@@ -159,6 +209,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyF') torchOn = !torchOn;
   // skok o pół doby: jedyny sposób zobaczyć noc bez czekania czterech minut
   if (e.code === 'KeyN') dayPhase = (dayPhase + 0.5) % 1;
+  if (e.code === 'KeyG') jumpToCave();
   if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'Space') e.preventDefault();
 });
 window.addEventListener('keyup', (e) => {
@@ -304,7 +355,7 @@ function drawHud(): void {
   screen.text(
     1,
     screen.rows - 1,
-    'WASD + mysz (klik = pointer lock), Shift = bieg, F = pochodnia, N = pół doby',
+    'WASD + mysz (klik = pointer lock), Shift = bieg, F = pochodnia, N = pół doby, G = jaskinia',
     HUD_DIM,
   );
 }
