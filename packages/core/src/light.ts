@@ -169,12 +169,24 @@ export function staticLum(rig: LightRig, staticLight: number, skyAccess: number)
 }
 
 /**
- * Migotanie pochodni: sinus o dwóch okresach plus szum z zegara.
- * Trzymane osobno od `lightAt`, bo zależy od czasu — a `lightAt` musi zostać
- * czystą funkcją, inaczej snapshoty przestałyby być powtarzalne.
+ * Migotanie pochodni: dwa sinusy o niewspółmiernych okresach, **±8% wokół jedynki**.
+ *
+ * Modulujemy wyłącznie intensywność — `torchRadius` zostaje stały i to jest
+ * istotne. Zasięg jest w tym rendererze granicą geometryczną: przy progu
+ * widoczności materiału komórka albo się maluje, albo nie, więc ruszanie
+ * promieniem wpuszcza i wypuszcza całe pasy ściany z kadru przy nieruchomej
+ * kamerze. Amplituda też ma znaczenie: pierwotne 0,76–1,00 przesuwało krawędź
+ * widzialności o kilkanaście procent zasięgu i to widać jako pulsowanie
+ * konturu, mimo że źródłem jest sama jasność.
+ *
+ * Częstotliwości są **niskie** (4,3 i 9,1 rad/s, czyli 0,7 i 1,4 Hz) i to też
+ * jest pomiar, nie gust: o ruchu obrazu decyduje przyrost jasności na klatkę,
+ * a nie amplituda. Przy 60 fps zmiana z 11,3/27,7 na 4,3/9,1 zbiła metrykę
+ * migotania przy nieruchomej kamerze z 0,17% na 0,10% (ważona atramentem),
+ * przy tej samej amplitudzie ±8%.
  */
 export function torchFlicker(timeSeconds: number): number {
-  const a = Math.sin(timeSeconds * 11.3);
-  const b = Math.sin(timeSeconds * 27.7);
-  return 0.88 + 0.08 * a + 0.04 * b;
+  const a = Math.sin(timeSeconds * 4.3);
+  const b = Math.sin(timeSeconds * 9.1);
+  return 1 + 0.05 * a + 0.03 * b;
 }

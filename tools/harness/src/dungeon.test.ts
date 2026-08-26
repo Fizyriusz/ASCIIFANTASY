@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { compileMaterials, renderWorld } from '@rpg/core';
+import { compileMaterials, renderWorld, torchFlicker } from '@rpg/core';
+import type { Screen } from '@rpg/core';
 import { inkOf, wildPack } from '@rpg/content';
 import {
   CHUNK_SIZE,
@@ -125,6 +126,41 @@ describe('ciemność', () => {
       for (let c = c0; c < c0 + 16; c++) if ((screen.chars[r * screen.cols + c] ?? 0) !== 0) deep++;
     }
     expect(deep).toBe(0);
+  });
+});
+
+describe('pochodnia', () => {
+  it('przy nieruchomej kamerze obraz stoi', () => {
+    // Migotanie ma być czuć w jasności, a nie w geometrii. Metryka jest ta sama
+    // co w M1c (udział komórek, które zmieniły glif, ważony pokryciem atramentem),
+    // tylko zamiast kroku gracza zmienia się faza płomienia. Progi z pomiaru przy
+    // dodaniu: 0,62% komórek, 0,10% ważone — dla porównania marsz w lesie daje
+    // 0,34-0,55% ważonej.
+    const s = dungeonScene('corridor');
+    const frames: Screen[] = [];
+    for (let i = 0; i < 10; i++) {
+      const screen = referenceScreen();
+      s.ctx.light.torchFlicker = torchFlicker(i / 60);
+      renderWorld(s.store, s.camera, screen, s.ctx);
+      frames.push(screen);
+    }
+    let changed = 0;
+    let painted = 0;
+    let ink = 0;
+    for (let k = 1; k < frames.length; k++) {
+      const a = frames[k - 1];
+      const b = frames[k];
+      if (a === undefined || b === undefined) continue;
+      for (let i = 0; i < a.chars.length; i++) {
+        const ca = a.chars[i] ?? 0;
+        const cb = b.chars[i] ?? 0;
+        if (ca !== 0 || cb !== 0) painted++;
+        if (ca !== cb) changed++;
+        ink += Math.abs(inkOf(ca) - inkOf(cb));
+      }
+    }
+    expect((100 * changed) / painted).toBeLessThan(1.2);
+    expect((100 * ink) / painted).toBeLessThan(0.2);
   });
 });
 
