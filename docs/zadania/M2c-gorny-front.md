@@ -100,6 +100,13 @@ w lesie i +36% na wzgórzach (12,3 → 16,1 ms i 9,0 → 12,2 ms w vitest, czyli
 około 3–4 ms w przeglądarce przy budżecie 8 ms). Okno niezamalowanych wierszy
 odzyskuje z tego mniej więcej połowę.
 
+**Uwaga do tych liczb: to koszt maski przy OBECNYM, błędnym modelu.** Maska maluje
+dziś między innymi fałszywe stropy, których w poprawionym modelu nie będzie, a spany
+zakryte przetwarza bez skrótu, który poprawiony model może dopuścić. Poprawiona
+wersja może kosztować mniej albo więcej. Te liczby są **przesłanką, nie prognozą**,
+i nie mogą same rozstrzygnąć wyboru ścieżki — decyduje pomiar na naprawionym
+kodzie, zrobiony przed wyborem, a nie po.
+
 Jeśli wyjdzie ścieżka B, §3.1 architektury trzeba przepisać, a nie dopisać do niej
 akapit: „szybka ścieżka dwóch frontów" przestaje być domyślna i cała sekcja o tym
 mówi inaczej.
@@ -128,7 +135,35 @@ Poza standardem z `CLAUDE.md`:
 4. **Budżet.** `renderWorld` na scenach pustkowia w przeglądarce poniżej 8 ms.
    Jeśli wybrana ścieżka kosztuje więcej niż +20% względem stanu z `feefc89`,
    podaj liczby i uzasadnij, dlaczego to opłacalne.
-5. **Podsumowanie zawiera, która ścieżka wybrana i dlaczego** — a jeśli żadna
+5. **Weryfikacja w grze, nie tylko w harnessie.** Cztery poprzednie rundy miały
+   zielone snapshoty i widoczny błąd na ekranie; snapshot pokazuje tylko tę scenę,
+   którą ktoś wcześniej wybrał.
+
+   Procedura, wąwóz wejściowy do jaskini z seeda 4242 — drzewa stoją tam kilkanaście
+   metrów na południe od rynny, a rampa daje płynną zmianę wysokości oka:
+
+   1. `G` — lądujesz w wąwozie na `(-177,5, -426,5)`, twarzą do wylotu tunelu
+      (na wschód, w stronę rosnącego `x`).
+   2. Obróć się **na południe** — tak, żeby `y` malało, gdy idziesz do przodu.
+      HUD podaje `x` i `y`, więc kierunek sprawdzasz jednym krokiem.
+   3. Idź na północ (`S` tyłem albo obrót i `W`) do `y ≈ -419`. HUD pokaże
+      wysokość **26,7 m n.p.m.**
+   4. Wróć na południe klawiszem `W` do `y ≈ -423`, czyli wysokość **24,5 m**.
+      To jest dokładnie sekwencja opadającego oka ze zgłoszenia.
+   5. Przez cały czas patrz na korony drzew 12–14 komórek przed sobą
+      (24–28 m; najbliższe to `(-180,-439)` z koroną 27,4–32,8 m oraz
+      `(-182,-439)`). **Na żadnej wysokości oka nie może pojawić się prostokątna
+      łata nieba na koronie, ani żadna łata nie może rosnąć w trakcie marszu.**
+
+   Wysokości do kontroli w HUD: y=-419 → 26,7 m, y=-421 → 25,6 m, y=-423 → 24,5 m,
+   y=-425 → 23,4 m.
+
+   Jeśli wykonawca nie może sprawdzić wizualnie (brak kompozycji klatek
+   w środowisku), to **procedura wyżej jest częścią zgłoszenia do odbioru**
+   i człowiek wykonuje ją przed przyjęciem zlecenia. Zielony harness bez tego
+   kroku nie wystarcza.
+
+6. **Podsumowanie zawiera, która ścieżka wybrana i dlaczego** — a jeśli żadna
    z dwóch powyżej, to co zamiast i co obaliło tamte.
 
 ---
@@ -139,6 +174,22 @@ Poza standardem z `CLAUDE.md`:
 - nie dodajemy przełącznika „stary/nowy front" — jedna ścieżka, jeden obraz,
 - nie zostawiamy trybu maski jako wyjątku bez testu identyczności; to on złapał
   wszystkie trzy warianty i bez niego naprawa jest nieweryfikowalna.
+
+---
+
+## Warunek zatrzymania
+
+**Po dwóch nieudanych próbach przerywasz i wracasz z opisem.** Nie próbujesz trzeciej.
+
+Próba nieudana to taka, po której **oba niezmienniki nadal się wykluczają** — jeden
+przechodzi kosztem drugiego. Wtedy raport zawiera: co konkretnie się wyklucza (który
+warunek w którym miejscu), dlaczego jedno wymusza drugie, i czego brakuje w modelu,
+żeby dało się mieć oba naraz.
+
+Powód jest policzony, nie ostrożnościowy: cztery łatki w poprzedniej rundzie
+kosztowały więcej niż jedna rozmowa o modelu, a skończyły się i tak wycofaniem
+commita. Rozmowa o modelu jest tańsza od piątej łatki i to jest jedyne, co ten
+warunek mówi.
 
 ---
 
