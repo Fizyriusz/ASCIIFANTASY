@@ -59,6 +59,21 @@ const WALK_SPEED = 6;
 const RUN_SPEED = 13;
 const MOUSE_SENS = 0.0022;
 const PITCH_LIMIT = 1.1;
+/**
+ * Piksele: pojedyncze zdarzenie myszy większe niż to jest **artefaktem pointer
+ * locka**, nie ruchem ręki, i jest odrzucane w całości.
+ *
+ * To odrzucanie wartości odstających, a nie filtr — ruch nie jest niczym
+ * uśredniany ani wygładzany, bo to psuje celowanie i wyszłoby w M3 przy walce.
+ * Zdarzenie mieszczące się w progu trafia do kamery bez zmian.
+ *
+ * Skala: przy `MOUSE_SENS` 0,0022 rad/px próg 200 px to jednorazowy obrót o 25°.
+ * Zgłoszony objaw „obrót o 90-180 stopni" wymagałby 700-1400 px w jednym
+ * zdarzeniu, czyli wartości, której ręka nie wytworzy przy 60 klatkach na sekundę.
+ * HUD pokazuje rozkład i licznik odrzuceń, żeby ten próg dało się sprawdzić
+ * pomiarem zamiast wiarą — patrz `mouseStats`.
+ */
+const MOUSE_JUMP = 200;
 
 /**
  * Doba w sekundach. Osiem minut, bo doba jest tu **oświetleniem, nie zegarem
@@ -218,10 +233,46 @@ window.addEventListener('keyup', (e) => {
 canvas.addEventListener('click', () => {
   if (document.pointerLockElement !== canvas) void canvas.requestPointerLock();
 });
+/**
+ * Rozkład |movement| w kubełkach dwójkowych: <2, <8, <32, <128, <512, reszta.
+ * Histogram zamiast listy próbek, bo ma być darmowy i bez alokacji — a do pytania
+ * „czy maksimum jest o rzędy wielkości większe od reszty" kubełki wystarczą.
+ */
+const mouseBuckets = new Int32Array(6);
+let mouseMax = 0;
+let mouseDropped = 0;
+/**
+ * Pierwsze zdarzenie po wejściu w pointer lock niesie deltę od pozycji kursora
+ * sprzed zablokowania, a nie ruch ręki. Po alt-tabie albo przełączeniu monitora
+ * bywa to kilkaset pikseli i to jest drugie źródło skoku kamery.
+ */
+let skipNextMove = false;
+
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement === canvas) skipNextMove = true;
+});
+
 window.addEventListener('mousemove', (e) => {
   if (document.pointerLockElement !== canvas) return;
-  cam.yaw += e.movementX * MOUSE_SENS;
-  cam.pitch -= e.movementY * MOUSE_SENS;
+  const mx = e.movementX;
+  const my = e.movementY;
+  const big = Math.max(Math.abs(mx), Math.abs(my));
+  if (big > mouseMax) mouseMax = big;
+  const b = big < 2 ? 0 : big < 8 ? 1 : big < 32 ? 2 : big < 128 ? 3 : big < 512 ? 4 : 5;
+  mouseBuckets[b] = (mouseBuckets[b] ?? 0) + 1;
+
+  if (skipNextMove) {
+    skipNextMove = false;
+    mouseDropped++;
+    return;
+  }
+  if (big > MOUSE_JUMP) {
+    mouseDropped++;
+    return;
+  }
+
+  cam.yaw += mx * MOUSE_SENS;
+  cam.pitch -= my * MOUSE_SENS;
   if (cam.pitch > PITCH_LIMIT) cam.pitch = PITCH_LIMIT;
   if (cam.pitch < -PITCH_LIMIT) cam.pitch = -PITCH_LIMIT;
 });
@@ -350,6 +401,15 @@ function drawHud(): void {
     1,
     2,
     `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}  pochodnia ${torchOn ? 'tak' : 'nie'}`,
+    HUD_DIM,
+  );
+  // Pomiar rozkładu ruchu myszy: kubełki, maksimum i licznik odrzuceń. Zostaje
+  // w HUD, bo próg `MOUSE_JUMP` jest dobrany z mechanizmu, a nie z pomiaru na tej
+  // maszynie — trzydzieści sekund gry plus alt-tab wystarczy, żeby go zweryfikować.
+  screen.text(
+    1,
+    3,
+    `mysz ${mouseBuckets.join('/')}  max ${mouseMax}  odrzucone ${mouseDropped}`,
     HUD_DIM,
   );
   screen.text(
