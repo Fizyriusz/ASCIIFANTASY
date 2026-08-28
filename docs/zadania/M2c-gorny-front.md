@@ -83,9 +83,17 @@ nie ma się do niego dopasowywać. Jeśli okaże się, że musi, zgłoś to zami
 
 ---
 
-## Co ma powstać
+## Co ma powstać — **wybrana ścieżka B**
 
-Rozstrzygnięcie należy do wykonawcy; dwie ścieżki, które widać z dzisiaj:
+Rozstrzygnięcie zapadło przed wykonaniem, na podstawie dwóch nieudanych prób opisanych
+niżej. Decyduje obserwacja z tamtej diagnozy: **fałszywy strop miał więcej niż jedno
+źródło**. Przy dwóch ścieżkach każdą przyszłą poprawkę trzeba robić dwa razy i za
+każdym razem sprawdzać, czy się nie rozjechały — a trzy ostatnie rundy poszły dokładnie
+na to. Dwa fronty były optymalizacją z M0 dla świata bez otworów i brył wiszących;
+dziś obsługują coraz węższy przypadek za cenę drugiej implementacji tej samej
+specyfikacji.
+
+Opis obu ścieżek zostaje poniżej jako zapis, dlaczego nie A.
 
 **A. Rozróżnienie sufit / bryła wisząca w górnym froncie.** Span dostaje odpowiedź
 na pytanie „czy nad tobą jest jeszcze coś w tej kolumnie". Sufit rzutuje płaszczyznę

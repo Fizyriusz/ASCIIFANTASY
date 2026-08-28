@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { compileMaterials, renderWorld, torchFlicker } from '@rpg/core';
 import type { Screen } from '@rpg/core';
-import { inkOf, wildPack } from '@rpg/content';
+import { inkOf, neonPack, wildPack } from '@rpg/content';
 import {
   CHUNK_SIZE,
   ChunkStore,
@@ -412,42 +412,15 @@ describe('otwory w kolumnie', () => {
     expect(empty).toBeLessThan(screen.rows * 0.5);
   });
 
-  it('sceny zewnętrzne nie wchodzą na ścieżkę maski', () => {
-    // Strażnik wydajności, nie poprawności. O tym, czy kolumna idzie wolną ścieżką,
-    // decyduje **wpis w paczce contentu** (`MaterialDef.transparent`). Oznaczenie
-    // wody jako przezroczystej wysłałoby każdą scenę z rzeką na ścieżkę 1,8× i nie
-    // wywaliłoby żadnego testu — obraz wyszedłby ten sam, tylko wolniej.
-    const screen = referenceScreen();
-    for (const view of ['hills', 'forest', 'river', 'ridge', 'seam'] as const) {
-      const s = wildScene(view);
-      const ctx = wildContext();
-      renderWorld(s.store, s.camera, screen, ctx);
-      expect(`${view}: ${ctx.maskedColumns}`).toBe(`${view}: 0`);
-    }
-  });
-
-  it('woda oznaczona jako przezroczysta wpada w strażnika', () => {
-    // Odpowiedź na pytanie „czy strażnik broni przed czymś, co może zajść".
-    // Scena `river` nie ma otworów, więc dziś daje zero — ale wystarczy jeden wpis
-    // w paczce, żeby każda kolumna z wodą poszła wolną ścieżką. Tu ten wpis robimy
-    // naumyślnie i sprawdzamy, że licznik to widzi.
-    const s = wildScene('river');
-    const ctx = wildContext();
-    ctx.materials = compileMaterials(
-      wildPack.materials.map((m) => (m.id === 'water' ? { ...m, transparent: true } : m)),
-    );
-    const screen = referenceScreen();
-    renderWorld(s.store, s.camera, screen, ctx);
-    expect(ctx.maskedColumns).toBeGreaterThan(20);
-  });
-
-  it('licznik kolumn z maską nie jest martwy', () => {
-    // Bez tego poprzedni test przechodziłby też wtedy, gdyby licznik nigdy nie rósł
-    const s = hutScene('door');
-    const screen = referenceScreen();
-    renderWorld(s.store, s.camera, screen, s.ctx);
-    expect(s.ctx.maskedColumns).toBeGreaterThan(10);
-    expect(s.ctx.maskedColumns).toBeLessThan(screen.cols);
+  it('materiał przezroczysty jest wyjątkiem, nie regułą', () => {
+    // Do M2c ten test pilnował licznika kolumn na masce, bo maska była wolną
+    // ścieżką. Teraz ścieżka jest jedna i flaga `transparent` znaczy tylko tyle,
+    // że span jest **otworem**: nie maluje się i niczego nie zasłania. Oznaczenie
+    // nią wody albo listowia zrobiłoby z nich dziury, przez które widać świat.
+    // Dlatego pilnujemy samej listy, a nie kosztu.
+    const przezroczyste = wildPack.materials.filter((m) => m.transparent === true).map((m) => m.id);
+    expect(przezroczyste).toEqual(['doorway', 'window']);
+    expect(neonPack.materials.filter((m) => m.transparent === true)).toEqual([]);
   });
 
   it('kolumna bez otworu nie płaci za maskę', () => {

@@ -117,112 +117,78 @@ Zapis po 200 h gry powinien mieć < 2 MB. Jeśli rośnie szybciej — coś zapis
 
 ### 3.1 Marsz kolumnowy
 
-Zastępuje obecny „DDA + floor-casting". Jedna pętla obsługuje teren, budynki, wnętrza.
-
-Kolumna ma **dwa fronty wypełniania**: `loRow` idzie od dołu ekranu w górę,
-`hiRow` od góry w dół. Kolumna kończy się, gdy fronty się zetkną.
+Jedna pętla obsługuje teren, budynki, wnętrza, lochy i bryły wiszące. Kolumna ekranu
+ma **jeden stan: maskę pokrycia** — bajt na wiersz, „zamalowany albo nie".
 
 ```
 dla każdej kolumny ekranu:
-  loRow = rows                     # najwyższy wiersz zamalowany od dołu
-  hiRow = -1                       # najniższy wiersz zamalowany od góry
-  floorZ = wysokość powierzchni pod kamerą     # zaczep frontu dolnego
-  ceilZ  = wysokość sufitu nad kamerą          # zaczep frontu górnego
+  cover[] = 0                                  # jedyny stan kolumny
+  DDA po siatce; komórka kamery jest pierwszym krokiem, z dEnter = 0
 
-  DDA po siatce, krok po komórce:
-    # --- front dolny: spany, na które patrzymy z góry (bottom < eyeZ) ---
-    dla każdego takiego spanu, od góry:
-      rowSurf = project(span.top, dist)
-      jeśli rowSurf >= loRow: pomiń                    # zasłonięty w całości
-      capZ = min(floorZ, span.top)                     # niższa z powierzchni
-      wallEnd = project(max(capZ, span.bottom), dist)  # ściana ma własny spód
-      maluj ścianę:  rowSurf .. wallEnd-1                        → mat
-      maluj czapkę:  wallEnd .. loRow-1, floor-cast na z = capZ  → capMat(capZ)
-      loRow = rowSurf;  floorZ = span.top
-      jeśli span.top > eyeZ: przerwij kolumnę          # bryła przecina poziom oka
+  dla każdej komórki, od najbliższej:
+    dEnter, dExit = dystanse wejścia i wyjścia promienia z tej komórki
+    dla każdego spanu w komórce:
+      jeśli materiał przezroczysty: pomiń (otwór nie maluje się i nie zasłania)
 
-    # --- front górny: sufity i spody mostów (bottom >= eyeZ), lustrzanie ---
-    dla każdego takiego spanu, od dołu:
-      rowSurf = project(span.bottom, dist)
-      jeśli rowSurf <= hiRow: pomiń
-      capZ = max(ceilZ, span.bottom)                   # wyższa z powierzchni
-      wallStart = project(min(capZ, span.top), dist)   # ściana ma własny szczyt
-      maluj spód:   hiRow+1 .. wallStart-1, floor-cast na z = capZ → capMat(capZ)
-      maluj ścianę: wallStart .. rowSurf                          → mat
-      hiRow = rowSurf;  ceilZ = span.bottom
+      # 1. lico boczne — pionowa ściana bryły, widziana z dEnter
+      rzutuj [bottom, top] na wiersze; maluj te, które nie są jeszcze pokryte
 
-    jeśli hiRow + 1 >= loRow: przerwij kolumnę         # ekran zapełniony
+      # 2. czapka — poziomy szczyt, gdy oko jest wyżej niż top
+      floor-cast na wysokości top, ale TYLKO w wierszach, których rzut
+      wypada na odcinku [dEnter, dExit] wewnątrz tej komórki
+
+      # 3. spód — poziomy dół, gdy oko jest niżej niż bottom
+      lustrzane odbicie czapki, ten sam warunek odcinka
+
+    jeśli maska pełna: koniec kolumny
+
+  wiersze bez pokrycia dostają niebo
 ```
 
-To jest render voxel-space (Comanche) uogólniony na spany. Zalety: teren, mosty i sufity
-z jednego kodu; brak osobnego floor-castingu; naturalne zasłanianie.
+To jest render voxel-space (Comanche) uogólniony na spany. Zalety: teren, mosty,
+sufity i korony z jednego kodu; naturalne zasłanianie wynika z kolejności marszu
+i maski, bez osobnej logiki.
 
-**Dlaczego dwa fronty, a nie jeden.** Pojedynczy front rosnący w górę renderuje
-poprawnie wszystko, na co patrzymy z góry, ale gubi każdą powierzchnię nad okiem —
-spód mostu i sufit wnętrza. To są dokładnie te dwa przypadki, dla których w ogóle
-rezygnujemy z „jednej wysokości na komórkę", więc front górny jest wymaganiem, nie
-ozdobą.
+**Dlaczego płaszczyzna należy do komórki.** Czapka i spód to floor-cast, czyli
+rzut płaszczyzny poziomej. Wolno ją malować wyłącznie w wierszach, których rzut
+wypada między dystansem wejścia a wyjścia promienia z **tej** komórki. Bez tego
+warunku spód korony drzewa stojącego dwieście metrów dalej rozlewa się na cały
+górny kadr jako nieskończony strop — komórka odległa o 254 m rzutowała swój spód
+na wiersze odległe o 25–43 m. Sufit pomieszczenia wychodzi z tej samej reguły bez
+wyjątku: sąsiednie komórki pokrywają swoje pasy i składają się w ciągłą płaszczyznę.
 
-**Dlaczego podział czapka/ściana bierze się z poprzedniej powierzchni w kolumnie,
-a nie z dolnej krawędzi spanu.** Pasek między rzutem poprzedniej powierzchni a rzutem
-bieżącej to pionowy uskok — ściana. Wszystko poniżej to płaszczyzna pozioma — czapka.
-Dla płaskiego terenu obie wysokości są równe, ściana wychodzi pusta i zostaje sama
-czapka; dla budynku ściana to fasada, a czapka to pasek ulicy u jej stóp. Reguła oparta
-na `span.bottom` maluje fasadę materiałem dachu. Ograniczenie ściany **własną** krawędzią
-spanu jest równie konieczne: bez niego przęsło mostu oglądane z dołu zamalowuje niebo.
+**Dlaczego lico maluje się w całości.** Do M2b zakres lica liczyło się od
+„poprzedniej powierzchni w kolumnie", żeby uskok terenu dostał lico grubości
+uskoku. To samo wychodzi z maski za darmo: dolna część lica jest już przykryta
+czapką bliższej komórki, więc wystarczy pomalować całość i pozwolić masce odrzucić
+to, czego nie widać. Jeden stan zamiast dwóch, jedna reguła zamiast dwóch.
 
-**Wnętrza**: gracz wewnątrz = zwykły przypadek — nad nim jest span sufitu, więc kolumna
-kończy się na nim. Portale (drzwi) to flaga na spanie, nie osobny system.
+**Czego tu nie ma i dlaczego.** Do M2b kolumna miała **dwa fronty wypełniania**
+(`loRow` rosnący od dołu, `hiRow` od góry) i przechodziła na maskę tylko wtedy, gdy
+trafiła na otwór. Była to optymalizacja z M0 dla świata bez otworów i brył wiszących.
+Fronty opisują kolumnę dwiema liczbami, więc zakładają, że pokrycie jest **spójne** —
+zamalowane od dołu i od góry, z jedną dziurą pośrodku. Świat z drzwiami, oknami,
+koronami drzew i przęsłami mostów tego założenia nie spełnia, a każda próba
+załatania kończyła się tym samym: fronty i maska rozjeżdżały się i trzeba było
+poprawiać dwa razy. Trzy rundy zgłoszeń z M2b (łaty nieba na koronach, fałszywy
+strop w niebie, korona gasnąca nad pniem) to jeden błąd modelu w trzech przebraniach.
+
+Optymalizacje zostają, ale są optymalizacjami **jednej** ścieżki, a nie drugą
+implementacją: okno niezamalowanych wierszy zawęża zakres malowania, a pełna maska
+kończy kolumnę natychmiast. Koszt zmiany: sceny pustkowia +79–197%, sceny miejskie
++20–32% (pomiar w `vitest`, w przeglądarce około trzykrotnie mniej — patrz §3.5).
 
 **Znane ograniczenie: jedna liczba światła na kolumnę.** Bajt światła należy do
 komórki `(x, y)`, a nie do spanu, więc kolumna z korytarzem pięć metrów pod łąką ma
-jedną wartość dla obu. M2 rozdziela ją na dwie połówki (jasność powierzchni i dostęp
-do nieba) i wybiera połówkę po tym, czy oko jest pod stropem komórki, z której patrzy —
-ale to jest heurystyka na jeden poziom, nie model. Do czasu spłaty obowiązuje zasada
-z §2.1: poziomy nie nakładają się w pionie, a generator lochu odrzuca układy, w których
-by się nakładały. **Termin spłaty i powód są w §10.1 — to jest dług blokujący M4.**
+jedną wartość dla obu. Rozdzielenie na dwie połówki (jasność powierzchni i dostęp
+do nieba) plus wybór połówki po tym, czy oko jest pod stropem, to heurystyka na jeden
+poziom, nie model. **Termin spłaty i powód są w §10.1 — to jest dług blokujący M4.**
 
-**Znane ograniczenie: otwór w środku kolumny.** Dwa fronty opisują stan kolumny
-dwiema liczbami, więc kolumna jest zawsze *spójna* — zamalowana od dołu i od góry,
-z jedną dziurą pośrodku. To wystarcza dla terenu, budynków, mostów i wnętrz, ale
-nie wyraża geometrii widocznej **przez otwór w środku widoku**: okna, arkady,
-bramy przejazdowej, dziury w murze. Przez taki otwór widać dalszą geometrię
-*między* dwoma zamalowanymi obszarami, czego para `(loRow, hiRow)` nie potrafi
-zapisać.
-
-**Rozstrzygnięte w M2: maska pokrycia, przełączana per kolumna.** Szybka ścieżka
-dwóch frontów została domyślną. Kolumna, która po drodze trafi na span materiału
-przezroczystego, przechodzi na `Uint8Array` o długości `rows`: jeden bajt na wiersz,
-zasiany tym, co fronty zdążyły zamalować, i marsz idzie dalej, aż maska się zapełni.
-
-Przełącznikiem jest **materiał**, nie flaga spanu. `SpanFlags.Door` i `Transparent`
-istnieją i chunk je ustawia, ale renderer ich nie czyta: `RenderTarget` nie ma metody
-`spanFlags`, a dołożenie jej znaczyłoby zmianę interfejsu, `SpanGrid` i wszystkich
-implementacji. `Material.transparent` niesie tę samą informację, jest już w tablicy
-materiałów renderera i kosztuje jedno pobranie pola. Flagi zostają dla kolizji
-i reguł gry — otwarte drzwi i okno różnią się tym, że przez jedno da się przejść,
-a to nie jest sprawa renderera.
-
-Pomiar (`pnpm bench`, ta sama chata i ta sama kamera, raz z materiałem otworu
-przezroczystym, raz nie): 1,348 ms wobec 1,153 ms na klatkę, przy 28 kolumnach
-z maską ze 150. Kolumna szybkiej ścieżki kosztuje w tej scenie **7,7 µs**, kolumna
-z maską **14,6 µs** — czyli **1,9×**. Osiem drzwi w kadrze to kilkanaście kolumn
-i różnica rzędu 0,1 ms; ściana samych okien to już 82 kolumny ze 150 (scena
-`window-portal`) i wtedy koszt maski jest głównym składnikiem klatki.
-
-Ujednolicenia **nie robimy**. Maska nie kończy kolumny, gdy fronty się zetkną —
-musi domalować maskę do końca, a na otwartym terenie fronty spotykają się po dwóch,
-trzech komórkach. Płacenie 80% narzutu na każdej kolumnie pustkowia za przypadek,
-który zdarza się w chatach i bramach, nie ma uzasadnienia.
-
-**Strażnik.** O tym, która ścieżka się włączy, decyduje wpis w paczce contentu
-(`MaterialDef.transparent`), a nie kod renderera. Oznaczenie wody jako przezroczystej
-przeniosłoby każdą scenę z rzeką na wolną ścieżkę i **nie zmieniłoby ani jednego
-piksela**, więc żaden snapshot by tego nie złapał. Dlatego `RenderContext` liczy
-`maskedColumns` na klatkę, a test wymaga zera dla scen `hills`, `forest`, `river`,
-`ridge`, `seam` (plus drugi test pilnuje, że licznik w ogóle rośnie). Renderer sprawdza
-też raz na klatkę, czy w tablicy materiałów jest cokolwiek przezroczystego — jeśli nie,
-kolumny w ogóle nie przeglądają spanów w poszukiwaniu otworu.
+**Znane ograniczenie: zasięg marszu.** `maxSteps` musi wystarczyć na cały `maxDepth`:
+jeden krok to jedna granica komórki, a promień pod 45° przecina dwie granice na
+komórkę odległości. Za mała wartość ucina marsz i widać to jako niebo w miejscu
+dalekiego grzbietu — przy 192 krokach i zasięgu 200 komórek bryły z 273–360 m
+znikały z kadru. Pilnuje tego niezmiennik nadmiarowego nieba (§9).
 
 ### 3.2 Materiały zamiast tekstur
 
@@ -512,6 +478,19 @@ Po M6: więcej contentu, nie więcej systemów. To jest moment, w którym takie 
 
 ---
 
+**Niezmienniki obrazu** (`tools/harness/src/invariants.test.ts`) — sprawdzane na
+wszystkich scenach naraz, bo pojedynczy snapshot łapie tylko tę scenę, którą ktoś
+wcześniej wybrał, a błąd renderera z M0 przeszedł przez trzy milestone'y niezauważony:
+
+- **brak nadmiarowego nieba.** Dla każdej komórki oznaczonej przez renderer jako
+  niebo puszczamy **marsz referencyjny bez żadnych optymalizacji** — próbkowanie
+  promienia co 0,2 komórki aż do zasięgu — i sprawdzamy, czy nie przechodzi przez
+  bryłę. Referencja jest wolna z premedytacją; jest niezależną implementacją tego
+  jednego pytania i dlatego łapie błędy, których obie „szybkie" ścieżki nie widziały.
+- **opadanie oka nie odsłania nieba.** Im niżej oko, tym wyżej rzutują się bryły nad
+  nim, więc komórek nieba nad horyzontem może tylko ubyć. Przyrost = zgubiona
+  geometria.
+
 ## 10. Długi techniczne (z terminem spłaty)
 
 Rzeczy, o których **wiemy**, że są tymczasowe, wraz z milestone'em, przed którym
@@ -537,37 +516,20 @@ w pionie między spanami tej samej komórki. Koszt pamięci: jeden bajt na span,
 czyli przy budżecie 1,3 spanu na komórkę mniej niż dzisiejsze `lights`. Zrobić
 **przed** M4, nie „przy okazji" M4 — inaczej wnętrza powstaną wokół ograniczenia.
 
-### 10.4 Górny front modeluje spód bryły jako nieskończony strop — spłata **przed M3**
+### 10.4 Górny front modeluje spód bryły jako nieskończony strop — **spłacone w M2c**
 
-`renderColumn` traktuje każdy span nad okiem jak sufit: jego spód rzutuje floor-castem
-jako **płaszczyznę poziomą ciągnącą się nad graczem**, a `hiRow` zapisuje wszystkie
-wiersze nad nim jako zamalowane. Dla wnętrza to prawda. Dla korony drzewa, przęsła
-mostu i każdej innej bryły wiszącej — nie: korona zasłania własny pas wierszy i nic
-poza tym, a nad nią może stać drugie drzewo albo góra.
+Zostawione jako zapis, bo diagnoza kosztowała trzy rundy i warto ją mieć w historii.
 
-Trzy zgłoszenia z rzędu w M2b to ten sam błąd w trzech przebraniach:
-- prostokątne łaty nieba na koronach, **rosnące, gdy oko opada** (pomiar: nieba nad
-  horyzontem 1216 komórek przy oku 3,4 m nad gruntem i 1905 przy 1,0 m);
-- „ciemna szachownica" zamiast tafli nieba, kiedy kolumny weszły na maskę: spód korony
-  stojącej 254 m dalej rozlewał się floor-castem na wiersze odległe o 25–43 m;
-- pień, który wpada w górny front, gdy oko zejdzie poniżej niego, przesuwa `hiRow`
-  poniżej wierszy własnej korony i korona przestaje się malować.
+`renderColumn` traktował każdy span nad okiem jak sufit: rzutował jego spód jako
+płaszczyznę ciągnącą się nad graczem i zapisywał wszystkie wiersze powyżej jako
+zamalowane. Dla wnętrza prawda, dla korony drzewa fałsz w obu punktach. Objawy:
+łaty nieba na koronach rosnące przy opadaniu oka (1216 → 1905 komórek nieba),
+„ciemna szachownica" zamiast tafli nieba, korona gasnąca po wejściu pnia w górny
+front.
 
-Próba naprawy przez przełączanie takich kolumn na maskę pokrycia (commit 33166c9,
-wycofany) usuwa pierwszy objaw i odsłania drugi: maska nie ma ogranicznika `hiRow`,
-więc fałszywy strop dostaje cały ekran. Ograniczenie floor-castu warunkiem „wiersz nie
-może rzutować się bliżej niż komórka, do której należy" usuwa drugi i psuje trzeci.
-Wniosek: to nie jest łatka, tylko brakujący element modelu — górny front potrzebuje
-rozróżnienia **sufit / bryła wisząca** i osobnej reguły rzutowania dla każdego.
-
-Termin: **przed M3**, bo sprite'y potworów i łupu są dokładnie bryłami wiszącymi
-i wejdą w ten sam kod.
-
-Niezmiennik, który trzeba dodać razem z naprawą (sprawdzony, łapie wszystkie trzy
-warianty): dla tej samej kamery render szybką ścieżką i render z wymuszoną maską
-(`RenderContext.forceMask`) muszą dawać **identyczny bufor znaków i kolorów**. Maska
-przestaje wtedy być punktem odniesienia, a staje się drugą implementacją tej samej
-specyfikacji.
+Spłata: **ścieżka B z M2c** — dwa fronty zniknęły, została maska pokrycia, a czapka
+i spód są płaszczyznami komórki ograniczonymi do odcinka promienia w niej (§3.1).
+Pilnują tego dwa niezmienniki opisane w §9.
 
 ### 10.2 Kolizja nie zna `SpanFlags.Stairs` — spłata w **M3**, razem z fizyką
 
