@@ -288,7 +288,6 @@ function loadGame(): void {
   for (const [kind, index] of p.items) pack.items.push({ kind: kind as 0 | 1, index });
   syncWeight(pack, a);
   dayPhase = (save.clock / (24 * 60)) % 1;
-  bestiary.forgetClusters();
   bestiary.restore(save.entities);
   panel = Panel.None;
   land(p.x, p.y, p.yaw);

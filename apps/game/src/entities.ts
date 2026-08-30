@@ -198,9 +198,13 @@ export class Bestiary {
   }
 
   /**
-   * Przywraca byty z zapisu. Klastry oznaczamy jako rozpatrzone dopiero przy
-   * następnym `spawnAround`, więc wczytanie nie tworzy drugiego kompletu goblinów
-   * w miejscach, które gracz już odwiedził.
+   * Przywraca byty z zapisu i **oznacza ich klastry jako rozpatrzone**. Bez tego
+   * kroku pierwsze `spawnAround` po wczytaniu dorzuciłoby drugi komplet goblinów
+   * do tych, które właśnie wróciły z pliku — łącznie z tymi, które gracz zabił.
+   *
+   * Klaster odtwarzamy z pozycji bytu, a nie z zapisu: byt, który odbiegł od swojego
+   * klastra, zostawia go nieoznaczonym i wtedy klaster odradza się przy wczytaniu.
+   * To jest znany dług, opisany w §10.6 architektury.
    */
   restore(list: readonly { kind: number; x: number; y: number; z: number; yaw: number; hp: number; ai: number }[]): void {
     this.mobs.length = 0;
@@ -210,12 +214,8 @@ export class Bestiary {
       if (e.hp <= 0) m.being.actor.stance = Stance.Dead;
       m.being.ai = e.ai as AiState;
       this.mobs.push(m);
+      this.seen.add(`${Math.floor(e.x / CLUSTER)}:${Math.floor(e.y / CLUSTER)}`);
     }
-  }
-
-  /** Zapomina, które klastry już rozpatrzył — po wczytaniu zapisu. */
-  forgetClusters(): void {
-    this.seen.clear();
   }
 
   /** Żywy byt najbliżej gracza — HUD pokazuje, na co właśnie patrzymy. */
