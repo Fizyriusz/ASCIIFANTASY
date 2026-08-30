@@ -9,6 +9,20 @@
  * się razem z graczem i przestaje być bryłą. Koszt to cztery rysunki zamiast jednego.
  */
 
+/**
+ * Nazwy klatek. Renderer nie zna tych stałych — dostaje numer klatki; nazwy są tu,
+ * bo to reguły i AI decydują, kiedy byt zamachuje się, a kiedy leży.
+ */
+export const Frame = {
+  Idle: 0,
+  Walk0: 1,
+  Walk1: 2,
+  Attack: 3,
+  Hit: 4,
+  Death: 5,
+} as const;
+export type Frame = (typeof Frame)[keyof typeof Frame];
+
 /** Jeden byt: klatki animacji × cztery kierunki, barwa i wysokość w metrach. */
 export interface CreatureDef {
   id: string;
@@ -40,16 +54,36 @@ export interface CreatureDef {
 const goblin: CreatureDef = {
   id: 'goblin',
   art: [
-    // --- klatka 0: stoi --- (przod, bok prawy, tyl, bok lewy)
+    // --- Idle: stoi --- (przod, bok prawy, tyl, bok lewy)
     [' ,^, ', '(o o)', '-|#|-', ' |#| ', ' |_| ', ' | | ', ' L J '],
     [' ,^  ', '(o=  ', ' |#|>', ' |#| ', ' |_| ', ' ||  ', ' LL  '],
     [' ,^, ', '(   )', '-|#|-', ' |#| ', ' |_| ', ' | | ', ' L J '],
     ['  ^, ', '  =o)', '<|#| ', ' |#| ', ' |_| ', '  || ', '  JJ '],
-    // --- klatka 1: idzie, palka w gorze, nogi rozstawione ---
+    // --- Walk0: krok lewa noga, palka w gorze ---
     [' ,^, ', '(o o)', '-|#|=', ' |#| ', ' |_| ', ' | | ', 'L   J'],
     [' ,^  ', '(o=  ', ' |#|^', ' |#| ', ' |_| ', ' |  |', ' L  J'],
     [' ,^, ', '(   )', '=|#|-', ' |#| ', ' |_| ', ' | | ', 'L   J'],
     ['  ^, ', '  =o)', '^|#| ', ' |#| ', ' |_| ', '|  | ', 'J   L'],
+    // --- Walk1: przeciwna faza kroku ---
+    [' ,^, ', '(o o)', '=|#|-', ' |#| ', ' |_| ', ' | | ', 'J   L'],
+    [' ,^  ', '(o=  ', ' |#|v', ' |#| ', ' |_| ', '|  | ', ' J  L'],
+    [' ,^, ', '(   )', '-|#|=', ' |#| ', ' |_| ', ' | | ', 'J   L'],
+    ['  ^, ', '  =o)', 'v|#| ', ' |#| ', ' |_| ', ' |  |', ' L  J'],
+    // --- Attack: palka wyprowadzona do przodu ---
+    [' ,^, ', '(o o)', '-|#|-', ' |#|=', ' |_|=', ' | | ', ' L J '],
+    [' ,^  ', '(o=  ', ' |#| ', ' |#|=', ' |_|=', ' ||  ', ' LL  '],
+    [' ,^, ', '(   )', '-|#|-', ' |#|=', ' |_|=', ' | | ', ' L J '],
+    ['  ^, ', '  =o)', ' |#| ', '=|#| ', '=|_| ', '  || ', '  JJ '],
+    // --- Hit: odrzucony ciosem, rece w bok ---
+    [' ,^, ', '(x x)', '-=#=-', ' |#| ', ' |_| ', ' | | ', ' L J '],
+    [' ,^  ', '(x=  ', '-=#=-', ' |#| ', ' |_| ', ' ||  ', ' LL  '],
+    [' ,^, ', '(   )', '-=#=-', ' |#| ', ' |_| ', ' | | ', ' L J '],
+    ['  ^, ', '  =x)', '-=#=-', ' |#| ', ' |_| ', '  || ', '  JJ '],
+    // --- Death: kupka na ziemi, gorne wiersze przezroczyste ---
+    ['     ', '     ', '     ', '     ', '     ', ' ,x, ', '-###-'],
+    ['     ', '     ', '     ', '     ', '     ', ' ,x  ', '-##=-'],
+    ['     ', '     ', '     ', '     ', '     ', ' ,-, ', '-###-'],
+    ['     ', '     ', '     ', '     ', '     ', '  x, ', '-=##-'],
   ],
   r: 120,
   g: 160,
