@@ -64,6 +64,7 @@ export function beginAttack(a: Actor): boolean {
   const w = weaponOf(a);
   if (a.stamina < w.stamina) return false;
   a.stamina -= w.stamina;
+  a.regenDelayMs = COMBAT.staminaRegenDelayMs;
   a.stance = Stance.Windup;
   a.stanceMs = w.windupMs;
   return true;
@@ -92,6 +93,7 @@ export function beginDodge(a: Actor): boolean {
   if (!ready(a)) return false;
   if (a.stamina < COMBAT.dodgeStamina) return false;
   a.stamina -= COMBAT.dodgeStamina;
+  a.regenDelayMs = COMBAT.staminaRegenDelayMs;
   a.stance = Stance.Dodging;
   a.stanceMs = COMBAT.dodgeRecoverMs;
   a.dodgeMs = COMBAT.dodgeWindowMs;
@@ -184,6 +186,7 @@ export function resolveAttack(att: Actor, def: Actor, rng: () => number, out: At
     } else {
       // blok przebity: cała wytrzymałość idzie w gwizdek, cios wchodzi w całości
       def.stamina = 0;
+      def.regenDelayMs = COMBAT.staminaRegenDelayMs;
       def.stance = Stance.Stagger;
       def.stanceMs = COMBAT.staggerMs;
       train(def, Skill.Block, false);

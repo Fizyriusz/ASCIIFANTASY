@@ -201,6 +201,26 @@ describe('maszyna stanów', () => {
     expect(intent.running).toBe(true);
   });
 
+  it('wyczerpany przeciwnik wycofuje się zamiast stać i próbować bić', () => {
+    // Dla gracza to jedyny czytelny sygnał „przeciwnik jest zmęczony"; dla symulacji
+    // to różnica między starciem, które się kończy, a dwoma bytami stojącymi
+    // naprzeciw siebie bez wytrzymałości.
+    const g = hall();
+    const gob = goblin(10, 10, 0);
+    const gracz = player(10.9, 10);
+    const intent = makeIntent();
+    pompuj(gob, gracz, g, intent);
+    expect(gob.ai).toBe(AiState.Fighting);
+
+    gob.actor.stamina = 0;
+    gob.actor.exhausted = true;
+    updateAi(gob, gracz, g, 16, rng, intent, MPC);
+    expect(gob.ai).toBe(AiState.Fighting);
+    // cofa się od gracza, ale nie ucieka — to nadal walka
+    expect(intent.vx).toBeLessThan(0);
+    expect(intent.running).toBe(false);
+  });
+
   it('trup nie ma zamiarów', () => {
     const g = hall();
     const gob = goblin(10, 10, 0);

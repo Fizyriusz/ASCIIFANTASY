@@ -182,10 +182,19 @@ function duel(seed: number, limitMs: number): { ms: number; hp: [number, number]
       if (stepCombat(self, dt)) resolveAttack(self, foe, rng, out);
       if (self.stance === Stance.Idle) {
         const r = rng();
-        if (r < 0.55) beginAttack(self);
-        else if (r < 0.75 && foe.stance === Stance.Windup) beginDodge(self);
-        else if (r < 0.9) beginBlock(self);
-      } else if (self.stance === Stance.Blocking && rng() < 0.2) {
+        // wyczerpany nie atakuje w próżnię — zasłania się i czeka na wytrzymałość;
+        // to jest minimum kompetencji, bez którego miara tempa walki mierzy
+        // zachowanie, którego żaden gracz nie powtórzy
+        if (self.exhausted) {
+          // nic: stojąc regeneruje 24/s, blokując 7/s — wyczerpany blok to pułapka
+        } else if (r < 0.55) {
+          beginAttack(self);
+        } else if (r < 0.75 && foe.stance === Stance.Windup) {
+          beginDodge(self);
+        } else if (r < 0.9) {
+          beginBlock(self);
+        }
+      } else if (self.stance === Stance.Blocking && (self.exhausted || rng() < 0.2)) {
         self.stance = Stance.Idle;
       }
     }
@@ -207,9 +216,12 @@ describe('dziesięć tysięcy starć', () => {
       if (ms < 0) nierozstrzygniete++;
       else czasy.push(ms);
     }
-    expect(nierozstrzygniete).toBe(0);
-
     czasy.sort((x, y) => x - y);
+    console.log(
+      `p99 ${(czasy[Math.floor(czasy.length * 0.99)]! / 1000).toFixed(1)} s, ` +
+        `max ${(czasy[czasy.length - 1]! / 1000).toFixed(1)} s, nierozstrzygnietych ${nierozstrzygniete}`,
+    );
+    expect(nierozstrzygniete).toBe(0);
     const mediana = czasy[czasy.length >> 1]!;
     console.log(
       `mediana starcia ${(mediana / 1000).toFixed(1)} s, ` +

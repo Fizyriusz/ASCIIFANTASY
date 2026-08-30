@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { COMBAT, PLAYER, Weapon, Armor, armors, weapons } from '@rpg/content';
+import { beginAttack, stepCombat } from './combat.js';
 import { Attr, Skill, Stance, makeActor, tickActor, loadFactor } from './actor.js';
 import { train } from './progress.js';
 import { equipArmor, equipWeapon, protectionOf, totalWeight, weaponOf, FISTS } from './equipment.js';
@@ -51,6 +52,73 @@ describe('aktor', () => {
     tickActor(a, 5000);
     expect(a.stance).toBe(Stance.Dead);
     expect(a.stamina).toBe(0);
+  });
+});
+
+describe('wytrzymałość jako zasób', () => {
+  it('po zamachu regeneracja stoi przez zadany czas', () => {
+    const a = player();
+    a.weapon = Weapon.Shortsword;
+    beginAttack(a);
+    const po = a.stamina;
+    // w trakcie opóźnienia nic nie wraca
+    for (let t = 0; t < COMBAT.staminaRegenDelayMs - 32; t += 16) tickActor(a, 16);
+    expect(a.stamina).toBe(po);
+    // ...i wraca dopiero po nim
+    tickActor(a, 100);
+    tickActor(a, 100);
+    expect(a.stamina).toBeGreaterThan(po);
+  });
+
+  it('ciągły atak wyczerpuje pulę w 4–6 sekundach, każdą bronią', () => {
+    // Miara jest w sekundach, a nie w ciosach: starcie trwa około pięciu sekund,
+    // więc to czas decyduje, czy zasób w ogóle wchodzi w grę. Liczba ciosów wychodzi
+    // z niego różna i taka ma być — sztylet jest szybki, maczuga ciężka.
+    for (let w = 0; w < weapons.length; w++) {
+      const a = player();
+      a.weapon = w;
+      let t = 0;
+      let ciosy = 0;
+      while (t < 60000) {
+        if (a.stance === Stance.Idle && !beginAttack(a)) break;
+        if (a.stance === Stance.Windup && a.stanceMs <= 16) ciosy++;
+        stepCombat(a, 16);
+        t += 16;
+      }
+      expect(t).toBeGreaterThan(4000);
+      expect(t).toBeLessThan(6500);
+      expect(ciosy).toBeGreaterThan(3);
+    }
+  });
+
+  it('wyczerpanie ma histerezę, więc stan nie migocze', () => {
+    const a = player();
+    a.stamina = COMBAT.exhaustedBelow - 1;
+    tickActor(a, 0);
+    expect(a.exhausted).toBe(true);
+
+    // tuż powyżej dolnego progu nadal wyczerpany — inaczej jedno tyknięcie
+    // regeneracji zdejmowałoby stan i zaraz go przywracało
+    a.stamina = COMBAT.exhaustedBelow + 1;
+    tickActor(a, 0);
+    expect(a.exhausted).toBe(true);
+
+    a.stamina = COMBAT.exhaustedClear + 1;
+    tickActor(a, 0);
+    expect(a.exhausted).toBe(false);
+  });
+
+  it('wyjście z zera do stanu zdatnego do walki trwa około sekundy', () => {
+    const a = player();
+    a.stamina = 0;
+    a.exhausted = true;
+    let t = 0;
+    while (a.exhausted && t < 10000) {
+      tickActor(a, 16);
+      t += 16;
+    }
+    expect(t).toBeGreaterThan(500);
+    expect(t).toBeLessThan(3000);
   });
 });
 

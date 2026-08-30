@@ -78,6 +78,19 @@ export interface Actor {
   stance: Stance;
   /** ms: ile jeszcze trwa bieżąca postawa */
   stanceMs: number;
+  /**
+   * ms do wznowienia regeneracji wytrzymałości. Bez tego opóźnienia regeneracja
+   * pokrywa większość kosztu ciosu w trakcie jego własnego cyklu i zasób przestaje
+   * być zasobem: pomiar z M3 dawał 16–56 ciosów bez przerwy przy starciu trwającym
+   * 4–5 s.
+   */
+  regenDelayMs: number;
+  /**
+   * Widocznie wyczerpany. Pole, a nie funkcja od `stamina`, bo próg ma histerezę:
+   * wchodzi się poniżej `exhaustedBelow`, wychodzi powyżej `exhaustedClear`.
+   * Pojedynczy próg dawałby migotanie stanu przy każdym tyknięciu regeneracji.
+   */
+  exhausted: boolean;
   /** ms: ile jeszcze trwa okno uniku — biegnie też w trakcie odbicia po uniku */
   dodgeMs: number;
 }
@@ -108,6 +121,8 @@ export function makeActor(
     carriedKg: 0,
     stance: Stance.Idle,
     stanceMs: 0,
+    regenDelayMs: 0,
+    exhausted: false,
     dodgeMs: 0,
   };
 }
@@ -135,10 +150,21 @@ export function tickActor(a: Actor, dtMs: number): void {
     }
   }
 
-  const perSec = a.stance === Stance.Blocking ? COMBAT.staminaRegenBlocking : COMBAT.staminaRegen;
-  // przeciążony byt regeneruje wolniej — waga jest kosztem, a nie liczbą w panelu
-  const regen = perSec * loadFactor(a) * (dtMs / 1000);
-  a.stamina = Math.min(a.maxStamina, a.stamina + regen);
+  if (a.regenDelayMs > 0) {
+    a.regenDelayMs -= dtMs;
+  } else {
+    const perSec = a.stance === Stance.Blocking ? COMBAT.staminaRegenBlocking : COMBAT.staminaRegen;
+    // przeciążony byt regeneruje wolniej — waga jest kosztem, a nie liczbą w panelu
+    const regen = perSec * loadFactor(a) * (dtMs / 1000);
+    a.stamina = Math.min(a.maxStamina, a.stamina + regen);
+  }
+
+  // histereza wyczerpania: dwa progi zamiast jednego, żeby stan nie migotał
+  if (a.exhausted) {
+    if (a.stamina > COMBAT.exhaustedClear) a.exhausted = false;
+  } else if (a.stamina < COMBAT.exhaustedBelow) {
+    a.exhausted = true;
+  }
 }
 
 /**

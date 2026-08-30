@@ -158,6 +158,16 @@ export function updateAi(
         enter(self, AiState.Hunting);
         break;
       }
+      // Wyczerpany byt **wycofuje się**, zamiast stać i próbować bić. Dwa powody:
+      // bez tego dwóch wyczerpanych przeciwników stoi naprzeciw siebie i starcie
+      // rozciąga się do kilkudziesięciu sekund (p95 z 12 s na 26 s w symulacji
+      // 10 000 pojedynków), a dla gracza cofający się potwór jest czytelnym
+      // sygnałem „jest zmęczony, teraz jest twoja chwila".
+      if (a.exhausted) {
+        endBlock(a);
+        moveTowards(self, self.x - dx, self.y - dy, self.walkMps, out, metersPerCell);
+        break;
+      }
       if (a.stance === Stance.Idle) {
         // trzy czwarte ciosów, reszta to blok — przeciwnik, który tylko bije,
         // uczy gracza jednego ruchu i przestaje być groźny
