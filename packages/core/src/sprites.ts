@@ -58,6 +58,15 @@ export interface SpriteInstance {
   frame: number;
   /** 0..1 — światło komórki, na której byt stoi */
   lum: number;
+  /**
+   * Barwa na tę jedną klatkę, zamiast barwy z `frames`. Tędy idzie rozbłysk
+   * trafienia: **podmiana barwy, a nie podbicie luminancji** — luminancja powyżej
+   * jedynki jest przycinana przez `shade` do bieli i byt traci barwę zamiast
+   * błysnąć. Renderer nie wie, co ten błysk znaczy; decyzję podejmuje warstwa gry.
+   */
+  r?: number;
+  g?: number;
+  b?: number;
   frames: SpriteFrames;
 }
 
@@ -133,7 +142,7 @@ export function drawSprites(
     // Byt zbyt ciemny, żeby go było widać, nie jest malowany wcale — ta sama
     // zasada co `Material.minLum` dla powierzchni. Potwór w ciemnym lochu jest
     // niewidoczny i to jest mechanika, nie przeoczenie.
-    const color = shade(f.r, f.g, f.b, inst.lum);
+    const color = shade(inst.r ?? f.r, inst.g ?? f.g, inst.b ?? f.b, inst.lum);
     if (color === 0) continue;
     let painted = 0;
     for (let row = r0; row < r1; row++) {
