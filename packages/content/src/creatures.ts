@@ -37,6 +37,15 @@ export interface CreatureDef {
   widthM: number;
   /** punkty życia na start; reszta reguł jest w `packages/rules` */
   hp: number;
+  /** metry na sekundę: marsz i pościg */
+  walkMps: number;
+  runMps: number;
+  /** indeks broni w `weapons`, `null` = pazury i zęby */
+  weapon: number | null;
+  /** SIŁ ZRĘ KON INT WOL CHA */
+  attrs: readonly number[];
+  /** ostrze, obuch, blok, unik, skradanie */
+  skills: readonly number[];
 }
 
 /**
@@ -91,6 +100,11 @@ const goblin: CreatureDef = {
   heightM: 1.4,
   widthM: 0.9,
   hp: 14,
+  walkMps: 1.5,
+  runMps: 3.8,
+  weapon: 2,
+  attrs: [35, 45, 35, 25, 30, 20],
+  skills: [10, 20, 5, 15, 25],
 };
 
 export const wildCreatures: readonly CreatureDef[] = [goblin];

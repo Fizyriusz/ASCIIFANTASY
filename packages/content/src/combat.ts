@@ -93,6 +93,19 @@ export const PERCEPTION = {
 } as const;
 
 /**
+ * Ruch. Metry na sekundę — prędkości są tu, a nie w kodzie, bo tempo poruszania
+ * jest odczuciem z gry i stroi się je razem z zasięgiem wzroku i czasem zamachu.
+ */
+export const MOVE = {
+  walkMps: 1.9,
+  runMps: 4.4,
+  /** bieg kosztuje wytrzymałość — inaczej nie ma powodu chodzić */
+  runStaminaPerSec: 9,
+  /** radiany na sekundę: jak szybko byt obraca się w stronę celu */
+  turnRate: 3.2,
+} as const;
+
+/**
  * Postać gracza na start. Atrybuty w skali 0..100, umiejętności tak samo —
  * jedna skala dla wszystkiego, żeby wzory nie musiały ich przeliczać.
  */
