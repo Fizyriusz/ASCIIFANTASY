@@ -21,7 +21,7 @@ function player(): Actor {
 
 function goblin(): Actor {
   const def = wildCreatures[0]!;
-  return makeActor(def.hp, 60, [35, 45, 35, 25, 30, 20], [10, 20, 5, 15, 25]);
+  return makeActor(def.hp, 60, def.attrs, def.skills);
 }
 
 describe('zamach jako odcinek czasu', () => {
