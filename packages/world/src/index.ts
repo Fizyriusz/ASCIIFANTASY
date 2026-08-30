@@ -38,3 +38,13 @@ export type { DungeonGraph, DungeonRoom, DungeonCorridor, DungeonVoid } from './
 export { structureAt, structuresNear, structureAtCell, StructurePart } from './structure.js';
 export type { Structure, StructureHit } from './structure.js';
 export { ChunkStore } from './streaming.js';
+export {
+  SAVE_VERSION,
+  serialize,
+  parse,
+  saveToStorage,
+  loadFromStorage,
+  clearStorage,
+  saveSizeBytes,
+} from './save.js';
+export type { GameSave, PlayerSave, EntitySave, StorageLike } from './save.js';
