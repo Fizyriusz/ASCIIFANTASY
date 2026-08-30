@@ -52,9 +52,12 @@ export interface CreatureDef {
  * Goblin: mały, garbaty, z pałką. Tył różni się od przodu brakiem oczu — bez takiej
  * różnicy cztery kierunki są ozdobą, bo dwa z nich dają ten sam obraz.
  *
- * Rysunek ma 5×7 znaków, a nie 3×4: skalowanie próbkuje najbliższego sąsiada, więc
- * z dwóch metrów każdy znak rysunku rozlewa się na kilkanaście komórek. Przy 3×4
- * goblin z bliska był jednolitą płachtą liter `o`.
+ * Rysunek ma 5×8 znaków. Ósmy wiersz **od góry** jest w większości klatek pusty
+ * i to jest miejsce na telegraf: klatka `Attack` wypełnia go uniesioną pałką, więc
+ * sylwetka rośnie w górę. Kierunek nie jest ozdobny, tylko wymuszony geometrią —
+ * w zwarciu (1,4 m) widać jedynie 18% ciała, czyli głowę i barki; nogi są poza dolną
+ * krawędzią kadru dokładnie wtedy, kiedy zamach ma znaczenie. Telegraf zapisany
+ * w rozstawie nóg byłby niewidoczny tam, gdzie jest potrzebny.
  *
  * Rysunek celowo bez ukośnika wstecznego — w rampach materiałów też go nie ma,
  * a w danych, które ktoś będzie poprawiał ręcznie, każdy znak wymagający ucieczki
@@ -64,39 +67,43 @@ const goblin: CreatureDef = {
   id: 'goblin',
   art: [
     // --- Idle: stoi --- (przod, bok prawy, tyl, bok lewy)
-    [' ,^, ', '(o o)', '-|#|-', ' |#| ', ' |_| ', ' | | ', ' L J '],
-    [' ,^  ', '(o=  ', ' |#|>', ' |#| ', ' |_| ', ' ||  ', ' LL  '],
-    [' ,^, ', '(   )', '-|#|-', ' |#| ', ' |_| ', ' | | ', ' L J '],
-    ['  ^, ', '  =o)', '<|#| ', ' |#| ', ' |_| ', '  || ', '  JJ '],
-    // --- Walk0: krok lewa noga, palka w gorze ---
-    [' ,^, ', '(o o)', '-|#|=', ' |#| ', ' |_| ', ' | | ', 'L   J'],
-    [' ,^  ', '(o=  ', ' |#|^', ' |#| ', ' |_| ', ' |  |', ' L  J'],
-    [' ,^, ', '(   )', '=|#|-', ' |#| ', ' |_| ', ' | | ', 'L   J'],
-    ['  ^, ', '  =o)', '^|#| ', ' |#| ', ' |_| ', '|  | ', 'J   L'],
+    ['     ', ' ,^, ', '(o o)', '-|#|-', ' |#| ', ' |_| ', ' | | ', ' L J '],
+    ['     ', ' ,^  ', '(o=  ', ' |#|>', ' |#| ', ' |_| ', ' ||  ', ' LL  '],
+    ['     ', ' ,^, ', '(   )', '-|#|-', ' |#| ', ' |_| ', ' | | ', ' L J '],
+    ['     ', '  ^, ', '  =o)', '<|#| ', ' |#| ', ' |_| ', '  || ', '  JJ '],
+    // --- Walk0: krok lewa noga ---
+    ['     ', ' ,^, ', '(o o)', '-|#|=', ' |#| ', ' |_| ', ' | | ', 'L   J'],
+    ['     ', ' ,^  ', '(o=  ', ' |#|v', ' |#| ', ' |_| ', ' |  |', ' L  J'],
+    ['     ', ' ,^, ', '(   )', '=|#|-', ' |#| ', ' |_| ', ' | | ', 'L   J'],
+    ['     ', '  ^, ', '  =o)', 'v|#| ', ' |#| ', ' |_| ', '|  | ', 'J   L'],
     // --- Walk1: przeciwna faza kroku ---
-    [' ,^, ', '(o o)', '=|#|-', ' |#| ', ' |_| ', ' | | ', 'J   L'],
-    [' ,^  ', '(o=  ', ' |#|v', ' |#| ', ' |_| ', '|  | ', ' J  L'],
-    [' ,^, ', '(   )', '-|#|=', ' |#| ', ' |_| ', ' | | ', 'J   L'],
-    ['  ^, ', '  =o)', 'v|#| ', ' |#| ', ' |_| ', ' |  |', ' L  J'],
-    // --- Attack: palka wyprowadzona do przodu ---
-    [' ,^, ', '(o o)', '-|#|-', ' |#|=', ' |_|=', ' | | ', ' L J '],
-    [' ,^  ', '(o=  ', ' |#| ', ' |#|=', ' |_|=', ' ||  ', ' LL  '],
-    [' ,^, ', '(   )', '-|#|-', ' |#|=', ' |_|=', ' | | ', ' L J '],
-    ['  ^, ', '  =o)', ' |#| ', '=|#| ', '=|_| ', '  || ', '  JJ '],
-    // --- Hit: odrzucony ciosem, rece w bok ---
-    [' ,^, ', '(x x)', '-=#=-', ' |#| ', ' |_| ', ' | | ', ' L J '],
-    [' ,^  ', '(x=  ', '-=#=-', ' |#| ', ' |_| ', ' ||  ', ' LL  '],
-    [' ,^, ', '(   )', '-=#=-', ' |#| ', ' |_| ', ' | | ', ' L J '],
-    ['  ^, ', '  =x)', '-=#=-', ' |#| ', ' |_| ', '  || ', '  JJ '],
+    ['     ', ' ,^, ', '(o o)', '=|#|-', ' |#| ', ' |_| ', ' | | ', 'J   L'],
+    ['     ', ' ,^  ', '(o=  ', ' |#|^', ' |#| ', ' |_| ', '|  | ', ' J  L'],
+    ['     ', ' ,^, ', '(   )', '-|#|=', ' |#| ', ' |_| ', ' | | ', 'J   L'],
+    ['     ', '  ^, ', '  =o)', '^|#| ', ' |#| ', ' |_| ', ' |  |', ' L  J'],
+    // --- Attack: palka nad glowa, sylwetka rosnie w gore ---
+    [' ,#, ', ' /|/ ', '(o o)', ' |#| ', ' (#) ', ' |_| ', ' | | ', ' L J '],
+    [' ,#  ', ' /|  ', '(o=  ', ' |#| ', ' (#) ', ' |_| ', ' ||  ', ' LL  '],
+    [' ,#, ', ' /|/ ', '(   )', ' |#| ', ' (#) ', ' |_| ', ' | | ', ' L J '],
+    ['  #, ', '  |/ ', '  =o)', ' |#| ', ' (#) ', ' |_| ', '  || ', '  JJ '],
+    // --- Hit: glowa odrzucona, rece w bok, nogi rozjezdzaja sie ---
+    ['     ', ' ,X, ', '(- -)', '=|#|=', ' |#| ', ' |_| ', ' | | ', 'L   J'],
+    ['     ', ' ,X  ', '(-=  ', '=|#|=', ' |#| ', ' |_| ', ' ||  ', 'L  J '],
+    ['     ', ' ,X, ', '(   )', '=|#|=', ' |#| ', ' |_| ', ' | | ', 'L   J'],
+    ['     ', '  X, ', '  =-)', '=|#|=', ' |#| ', ' |_| ', '  || ', ' L  J'],
     // --- Death: kupka na ziemi, gorne wiersze przezroczyste ---
-    ['     ', '     ', '     ', '     ', '     ', ' ,x, ', '-###-'],
-    ['     ', '     ', '     ', '     ', '     ', ' ,x  ', '-##=-'],
-    ['     ', '     ', '     ', '     ', '     ', ' ,-, ', '-###-'],
-    ['     ', '     ', '     ', '     ', '     ', '  x, ', '-=##-'],
+    ['     ', '     ', '     ', '     ', '     ', '     ', ' ,x, ', '-###-'],
+    ['     ', '     ', '     ', '     ', '     ', '     ', ' ,x  ', '-##=-'],
+    ['     ', '     ', '     ', '     ', '     ', '     ', ' ,-, ', '-###-'],
+    ['     ', '     ', '     ', '     ', '     ', '     ', '  x, ', '-=##-'],
   ],
-  r: 120,
-  g: 160,
-  b: 90,
+  // Barwa ciepła i jasna, celowo daleka od zieleni liści i trawy. Zielony goblin
+  // miał w lesie medianę kontrastu barwy 24 na 255 (na łące 78, w lochu 43) — czyli
+  // w lesie zlewał się z tłem. Po zmianie: las 90, łąka 111, loch 68. Metoda pomiaru
+  // i pełna tabela są w zleceniu M3b §3.
+  r: 220,
+  g: 130,
+  b: 70,
   heightM: 1.4,
   widthM: 0.9,
   hp: 14,
@@ -114,3 +121,16 @@ export const WildCreature = {
 } as const;
 
 export type WildCreature = (typeof WildCreature)[keyof typeof WildCreature];
+
+/**
+ * Rozmnażanie: co który klaster jest zamieszkany i ilu bytów się w nim spodziewać.
+ * To są liczby balansu, więc mieszkają w contencie — groźba ma wychodzić
+ * z liczebności grupy, a nie z siły pojedynczego przeciwnika.
+ */
+export const WILD_SPAWN = {
+  /** jeden na tyle klastrów jest zamieszkany */
+  oneInClusters: 8,
+  /** rozmiar grupy, włącznie z granicami */
+  packMin: 1,
+  packMax: 3,
+} as const;

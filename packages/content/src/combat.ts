@@ -44,6 +44,21 @@ export const COMBAT = {
 
   /** wytrzymałość na sekundę, gdy byt nic nie robi */
   staminaRegen: 14,
+  /**
+   * ms bez regeneracji po zamachu, uniku i przebitym bloku. To jest jedyny powód,
+   * dla którego wytrzymałość w ogóle jest zasobem: bez opóźnienia regeneracja
+   * 14/s pokrywała większość kosztu ciosu w trakcie jego własnego cyklu i można
+   * było atakować bez przerwy przez 16-56 ciosów, przy starciu trwającym 4-5 s.
+   * Wartość dobrana tak, żeby przekraczała pełny cykl najszybszej broni (380 ms).
+   */
+  staminaRegenDelayMs: 700,
+  /** poniżej tylu punktów byt jest widocznie wyczerpany */
+  exhaustedBelow: 20,
+  /**
+   * ...i dopiero powyżej tylu z tego wychodzi. Histereza, bo próg pojedynczy daje
+   * migotanie stanu przy każdym tyknięciu regeneracji.
+   */
+  exhaustedClear: 34,
   /** ...i gdy trzyma blok: mniej, więc blok w nieskończoność nie działa */
   staminaRegenBlocking: 4,
   /** poniżej tylu punktów cios wytrąca z równowagi */
