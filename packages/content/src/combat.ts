@@ -51,10 +51,15 @@ export const COMBAT = {
   /** ms: ile trwa wytrącenie */
   staggerMs: 500,
 
-  /** rozwój przez użycie: przyrost przy umiejętności 0 */
-  growthBase: 0.9,
+  /**
+   * Rozwój przez użycie: przyrost punktów przy umiejętności 0. Wartość jest mała
+   * celowo — przy 0,12 przejście 0→100 kosztuje około 2500 udanych użyć, czyli
+   * godziny gry. Przy 0,9 (pierwsza próba) całą umiejętność wyrabiało 268 ciosów,
+   * a więc jedno dłuższe starcie.
+   */
+  growthBase: 0.12,
   /** ...i tempo hamowania — przy skill = growthHalf przyrost jest połową bazowego */
-  growthHalf: 35,
+  growthHalf: 25,
   /** ułamek przyrostu za nieudaną próbę: uczysz się też na pudłach, ale wolniej */
   growthOnMiss: 0.25,
 

@@ -15,4 +15,4 @@ export { wildCreatures, WildCreature, Frame } from './creatures.js';
 export type { CreatureDef } from './creatures.js';
 export { weapons, armors, Weapon, Armor, WeaponSkill } from './items.js';
 export type { WeaponDef, ArmorDef } from './items.js';
-export { COMBAT, PERCEPTION } from './combat.js';
+export { COMBAT, PERCEPTION, PLAYER } from './combat.js';
