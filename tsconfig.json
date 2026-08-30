@@ -21,6 +21,8 @@
       "@rpg/world/*": ["packages/world/src/*"],
       "@rpg/content": ["packages/content/src/index.ts"],
       "@rpg/rules": ["packages/rules/src/index.ts"],
+      "@rpg/ui": ["packages/ui/src/index.ts"],
+      "@rpg/ui/*": ["packages/ui/src/*"],
       "@rpg/rules/*": ["packages/rules/src/*"],
       "@rpg/content/*": ["packages/content/src/*"]
     }
