@@ -16,6 +16,8 @@ export {
   torchFlicker,
 } from './light.js';
 export type { LightRig } from './light.js';
+export { SPRITE_DIRS, compileSprite, drawSprites } from './sprites.js';
+export type { SpriteFrames, SpriteInstance } from './sprites.js';
 export { compileMaterials, materialGlyph, hashStep, roughnessFalloff, TEXTURE_TUNING } from './materials.js';
 export type { Material } from './materials.js';
 export type { Camera, ColumnHits, RenderTarget, RenderContext, RenderOptions } from './raymarch.js';
