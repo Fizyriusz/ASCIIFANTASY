@@ -86,3 +86,16 @@ export const PERCEPTION = {
   /** ms: jak długo byt szuka po utracie celu z oczu, zanim wróci do spokoju */
   searchMs: 6000,
 } as const;
+
+/**
+ * Postać gracza na start. Atrybuty w skali 0..100, umiejętności tak samo —
+ * jedna skala dla wszystkiego, żeby wzory nie musiały ich przeliczać.
+ */
+export const PLAYER = {
+  hp: 45,
+  stamina: 100,
+  /** SIŁ ZRĘ KON INT WOL CHA */
+  attrs: [45, 45, 45, 40, 40, 40] as const,
+  /** ostrze, obuch, blok, unik, skradanie */
+  skills: [25, 10, 15, 15, 10] as const,
+} as const;
