@@ -18,8 +18,10 @@ import {
   dungeonsNear,
   loadFromStorage,
   mulberry32,
+  parse,
   saveSizeBytes,
   saveToStorage,
+  serialize,
 } from '@rpg/world';
 import type { GameSave } from '@rpg/world';
 import {
@@ -263,6 +265,44 @@ function saveGame(): void {
   }
 }
 
+/**
+ * Eksport do pliku. Na Vercelu nie ma backendu, więc jedyny trwały nośnik poza
+ * `localStorage` to plik na dysku gracza — a `localStorage` znika razem z wyczyszczeniem
+ * danych witryny, czego gracz robiący porządki nie wiąże z utratą stu godzin gry.
+ */
+function exportSave(): void {
+  const text = serialize(snapshot());
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ascii-rpg-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  note('wyeksportowano do pliku');
+}
+
+/** Import z pliku: ten sam `parse`, więc uszkodzony plik daje komunikat, a nie awarię. */
+function importSave(): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (file === undefined) return;
+    void file.text().then((text) => {
+      const save = parse(text);
+      if (save === null) {
+        note('plik nie jest zapisem tej gry');
+        return;
+      }
+      saveToStorage(localStorage, save);
+      hasSave = true;
+      loadGame();
+    });
+  });
+  input.click();
+}
+
 function loadGame(): void {
   const save = loadFromStorage(localStorage);
   if (save === null) {
@@ -426,6 +466,14 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'F9') {
     e.preventDefault();
     loadGame();
+  }
+  if (e.code === 'F6') {
+    e.preventDefault();
+    exportSave();
+  }
+  if (e.code === 'F7') {
+    e.preventDefault();
+    importSave();
   }
   if (e.code === 'Space') beginDodge(player.actor);
 });
@@ -701,7 +749,7 @@ function drawHud(): void {
   screen.text(
     1,
     screen.rows - 1,
-    'WASD, LPM cios, PPM blok, Spacja unik, I plecak, C karta, F5/F9 zapis, F pochodnia, G jaskinia',
+    'WASD, LPM cios, PPM blok, Spacja unik, I plecak, C karta, F5/F9 zapis, F6/F7 plik, F pochodnia, G jaskinia',
     HUD_DIM,
   );
 
