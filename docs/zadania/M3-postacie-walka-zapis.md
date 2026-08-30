@@ -10,6 +10,32 @@ Przeczytaj wcześniej: `CLAUDE.md`, `docs/architektura.md` §2.3, §3.4 i §6.
 
 ---
 
+## Ryzyko wejściowe: zapas budżetu klatki
+
+**Pomiar wydajności robisz w M3 od pierwszego dnia, nie na końcu.**
+
+Po M2c zapas w budżecie 8 ms na `renderWorld` stopniał do **4–5,5 ms** na scenach
+pustkowia (pomiar w przeglądarce; w `vitest` odpowiednio 12,5–16,1 ms). Powód jest
+znany i świadomy: maska pokrycia jako jedyna ścieżka plus marsz sięgający całego
+zasięgu — czyli odzyskana geometria, nie narzut. Ale to znaczy, że **M3 dokłada
+sprite'y i bufor głębi do klatki, która ma już tylko 2,5–4 ms luzu**.
+
+Konsekwencje dla planu pracy:
+
+- bench sprite'ów powstaje razem z pierwszym sprite'em, a nie po walce;
+- scena referencyjna dostaje wariant z kilkunastoma potworami w kadrze i to ona,
+  a nie pusty pustkowie, jest miarą;
+- jeśli sprite'y wypchną klatkę ponad budżet, **najpierw pomiar, gdzie idzie czas**:
+  bufor głębi na komórkę znakową jest tani, ale sortowanie i rysowanie dziesiątek
+  billboardów już nie. Nie optymalizuj renderera terenu na ślepo — po M2c jego koszt
+  jest zmierzony i rozpisany w §3.1.
+
+Gdyby okazało się, że nie da się zmieścić, właściwą odpowiedzią jest **zmniejszenie
+zasięgu widzenia albo liczby sprite'ów w kadrze**, a nie powrót do dwóch ścieżek
+w rendererze — ten dług został spłacony w M2c i kosztował trzy rundy poprawek.
+
+---
+
 ## Zakres
 
 ### Wolno dotykać

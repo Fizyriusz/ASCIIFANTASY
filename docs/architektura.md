@@ -531,6 +531,24 @@ Spłata: **ścieżka B z M2c** — dwa fronty zniknęły, została maska pokryci
 i spód są płaszczyznami komórki ograniczonymi do odcinka promienia w niej (§3.1).
 Pilnują tego dwa niezmienniki opisane w §9.
 
+### 10.5 `ctx.skyMask` — hak testowy w kodzie produkcyjnym
+
+`RenderContext.skyMask` to opcjonalny bufor „ta komórka to niebo", jeden bajt na znak
+ekranu. W grze jest `null` i nie kosztuje nic poza jednym porównaniem na komórkę nieba.
+Istnieje wyłącznie po to, żeby niezmiennik nadmiarowego nieba (§9) wiedział **dokładnie**,
+które komórki są niebem.
+
+Dlaczego nie da się inaczej, dziś: rozpoznanie po barwie daje fałszywe trafienia po
+kwantyzacji — skała o luminancji 0,09 i niebo o 0,06 lądują po `pack15` w tym samym
+kolorze, co dawało 474 fałszywe zgłoszenia w jednej scenie lochu. Porównanie z renderem
+bez materiału nieba też nie działa, odkąd mgła miesza barwę powierzchni z barwą nieba:
+zamalowana mgłą skała wygląda wtedy jak komórka, która istnieje tylko dzięki niebu.
+
+Do usunięcia, jeśli bufor ekranu kiedykolwiek dostanie **osobny kanał na źródło
+piksela** (materiał albo klasa powierzchni). Wtedy test czyta ten kanał, a renderer
+nie musi wiedzieć, że jest testowany. Dopóki bufor ma tylko znak i barwę, hak zostaje —
+z tym wpisem, żeby nie udawał, że jest częścią modelu.
+
 ### 10.2 Kolizja nie zna `SpanFlags.Stairs` — spłata w **M3**, razem z fizyką
 
 Ruch gracza zna jeden próg: `STEP_UP = 0,6 m`. Schodów nie rozpoznaje, mimo że
