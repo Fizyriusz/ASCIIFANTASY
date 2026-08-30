@@ -111,6 +111,21 @@ interface SaveFile {
 
 Zapis po 200 h gry powinien mieć < 2 MB. Jeśli rośnie szybciej — coś zapisujemy niepotrzebnie.
 
+**Stan po M3** (`packages/world/src/save.ts`). Działa: seed, zegar, pełny stan gracza
+z plecakiem, delty komórek, byty i flagi. Nie ma jeszcze frakcji ani questów — wejdą
+z M4 i M5, jako kolejne pola i podbicie `SAVE_VERSION`.
+
+Format na dysku jest **krotkowy**: span leży jako `[bottom, top, mat, capMat, flags]`,
+a delty jako lista par, nie obiekt. Powód jest zmierzony: przy 11 990 deltach
+z syntetycznych 200 godzin gry wychodzi **483 kB zamiast 1319 kB**, czyli 41 bajtów
+na deltę zamiast 113. Nazwy pól powtórzone przy każdym spanie kosztują tu więcej
+niż same liczby.
+
+`parse` zwraca `null` zamiast rzucać, a klucz delty o złym kształcie jest pomijany:
+źródłem jest `localStorage` albo plik od gracza, więc może być czymkolwiek. Gra ma
+wtedy zacząć nową partię, a nie się wywalić — i na pewno nie nadpisać przypadkowej
+komórki.
+
 ---
 
 ## 3. Renderer (`packages/core`)
@@ -294,9 +309,33 @@ Konsekwencje rozgrywkowe za darmo: loch bez światła jest naprawdę nieczytelny
 
 ### 3.4 Sprite'y
 
-Sprite to `frames: string[][]` — siatka znaków, nie bitmapa. Skalowanie: próbkowanie
-najbliższego sąsiada z maski. Klatki: idle / walk×2 / attack / hit / death.
-Kolor z palety frakcji lub materiału. Duże potwory = po prostu większa siatka.
+Sprite to siatka znaków, nie bitmapa: `frames[klatka * 4 + kierunek]` w `Uint16Array`,
+gdzie zero znaczy przezroczysty. Skalowanie próbkuje najbliższego sąsiada. Klatki:
+`Idle`, `Walk0`, `Walk1`, `Attack`, `Hit`, `Death` — po cztery kierunki każda, wybierane
+kątem między zwrotem bytu a kierunkiem na kamerę, jak w Doomie. Bez kierunków NPC
+obraca się razem z graczem i czyta się jak naklejka.
+
+**Dwie skale, nie jedna.** Wysokość na ekranie liczy się z `kv` (metry na wiersz),
+a szerokość z długości wektora płaszczyzny (metry na kolumnę). To są różne wielkości,
+bo komórka znakowa nie jest kwadratem — wyprowadzenie szerokości z wysokości razy
+proporcje rysunku daje sprite'a rozdętego mniej więcej dwukrotnie. Dlatego byt ma
+w contencie **osobno** `heightM` i `widthM`.
+
+**Test głębi jest per komórka znakowa**, przeciwko `Screen.depth` (`Float32Array`
+o rozmiarze `cols * rows`, zapisywany w tym samym miejscu, w którym renderer maluje
+znak). Nie per kolumna: od M2 kolumna z otworem ma trzy różne głębokości i sprite
+w drzwiach musi być widoczny, a ten za ścianą — nie. Każdy piksel sprite'a **zapisuje**
+swoją głębokość, więc bliższy wygrywa niezależnie od kolejności listy i nie ma po co
+sortować.
+
+**Światło bierze się z bytu, nie z komórki.** `SpriteInstance.lum` wypełnia gra tym
+samym `lightAt`, którym renderer maluje powierzchnie — razem z pochodnią. Byt, którego
+barwa po kwantyzacji do 15 bitów wychodzi czarna, nie jest malowany wcale: potwór
+w ciemnym lochu jest niewidoczny i to jest mechanika, ta sama zasada co `Material.minLum`.
+
+Koszt: 60 bytów w kadrze to **0,032 ms** średniej (`pnpm bench`, `sprite.bench.ts`),
+przy renderze terenu rzędu 20 ms w vitest. Sprite'y nie są pozycją w budżecie klatki;
+bufor głębi kosztuje 4 bajty na komórkę, czyli 60 kB przy limicie 15 000 komórek.
 
 ### 3.5 Budżety
 
@@ -403,16 +442,49 @@ Dziennik: zapisuje *co gracz wie*, nie prawdę. Jeśli plotka kłamała, dzienni
 
 ## 6. Reguły gry (`packages/rules`)
 
-Minimum, które musi stać przed dodaniem czegokolwiek:
+Stan po M3. Wszystkie liczby są w `packages/content` (`COMBAT`, `PERCEPTION`, `MOVE`,
+`PLAYER`, `weapons`, `armors`) — zmiana balansu nie dotyka tej paczki.
 
-- **Atrybuty**: 6 sztuk (SIŁ ZRĘ KON INT WOL CHA), skille 0–100, rozwój przez użycie
-- **Walka**: real-time, prędkość broni, wytrzymałość (stamina) jako zasób, blok/unik na timing
-- **Trafienie**: `skill + atrybut + modyfikatory vs. obrona` — jeden rzut, bez tabelek
-- **Ekwipunek**: waga, sloty, zużycie, brak automatycznej regeneracji
-- **Magia**: konstruktor zaklęć (efekt × siła × czas × zasięg → koszt), nie lista 200 czarów
-- **Postęp**: poziom z sumy skilli, jak w Daggerfallu
+**Aktor.** Gracz i potwór to ten sam typ: hp, wytrzymałość, sześć atrybutów
+(SIŁ ZRĘ KON INT WOL CHA) i pięć umiejętności w jednej skali 0..100. Jedna skala,
+żeby wzór trafienia dodawał je wprost — przelicznik między skalami to miejsce,
+w którym balans przestaje być czytelny.
 
-Wszystkie liczby w `content/`, żeby balans nie wymagał dotykania kodu.
+**Postawa jest jednym polem** (`Idle`, `Windup`, `Recover`, `Blocking`, `Dodging`,
+`Stagger`, `Dead`). Dzięki temu blok w trakcie zamachu jest niemożliwy ze stanu,
+a nie dzięki sprawdzeniu, które da się przeoczyć.
+
+**Cios to odcinek czasu, nie zdarzenie**: `Windup` (już nie do cofnięcia) → trafienie →
+`Recover` (bezradność). Wybór broni jest więc decyzją o tym, ile sekund jesteś otwarty:
+sztylet 180/200 ms, maczuga 460/520 ms przy dwa razy większych obrażeniach.
+`stepCombat` zwraca `true` dokładnie w klatce dojścia ciosu, a zasięg sprawdza warstwa,
+która zna pozycje (`serviceSwing`) — reguły walki nie znają geometrii.
+
+**Trafienie to jeden rzut**: `baza + umiejętność + zręczność − obrona`, klamrowany
+do 5–95%. Blok redukuje obrażenia i zjada wytrzymałość proporcjonalnie do tego, co
+zatrzymał — i pęka, gdy jej zabraknie. Unik ma krótkie okno i dłuższe odbicie, więc
+unik w ciemno jest gorszy niż unik w odpowiedzi na zamach.
+
+**Hp nie regeneruje się nigdy.** Regeneruje się wyłącznie wytrzymałość, a przeciążenie
+ją spowalnia (do 35% przy pełnym udźwigu i niżej już nie schodzi). Regeneracja hp
+z czasem zamienia wytrzymałość w dekorację, bo każde starcie da się przeczekać w kącie.
+
+**Rozwój przez użycie**, logarytmiczny: 0→100 kosztuje około 2500 udanych zastosowań,
+czyli godziny gry. Nieudana próba też uczy, ćwiartką przyrostu — inaczej optymalną
+strategią jest bicie najsłabszego przeciwnika w grze.
+
+**Percepcja i AI.** `canSee` sprawdza po kolei dystans, stożek, światło i dopiero na
+końcu linię wzroku po siatce — od najtańszego do najdroższego, bo biegnie dla każdego
+bytu w każdej klatce. Światło bierze z **bytu**, nie z komórki, więc pochodnia zdradza
+i skradanie wychodzi z M2 za darmo, bez osobnego systemu ukrycia. Hałas jest osobnym
+kanałem i nie zależy od światła. AI to pięć stanów i `switch`
+(`idle → suspicious → hunting → fighting → fleeing`); ucieczka wygrywa ze wszystkim
+innym, bo przeciwnik walczący do śmierci sprawia, że świat wydaje się mechaniczny.
+AI **nie porusza bytem** — zapisuje zamiar (`Intent`), a przesunięcie z kolizją robi
+warstwa gry tym samym kodem, którym rusza graczem.
+
+Magia (konstruktor zaklęć) i poziom postaci z sumy umiejętności — po M3, osobnym
+zadaniem. Konstruktor zaklęć jest projektem sam w sobie i nie mieści się w tym etapie.
 
 ---
 
@@ -420,6 +492,15 @@ Wszystkie liczby w `content/`, żeby balans nie wymagał dotykania kodu.
 
 Panele rysują się do tego samego bufora znaków co świat — ramki z `│ ─ ┌ ┐`, ta sama
 czcionka, ten sam bloom. Zero HTML overlay.
+
+Stan po M3: `panel.ts` (ramka, wiersz listy, pasek, tekst wyśrodkowany, barwy) plus
+trzy ekrany — ekwipunek, karta postaci, ekran śmierci. Pierwszy panel jest wzorcem
+dla następnych: panel, który rysuje sobie własne obramowanie znak po znaku, jest błędem,
+nawet gdy wygląda tak samo. Dwie decyzje warte zapamiętania: **kursor to znak `>`,
+nie inwersja koloru** (inwersja wymagałaby drugiego kanału na komórkę, a znak czyta się
+też w zrzucie snapshotowym), a **pasek wypełnia się `#`, nie blokiem** — stoi obok
+tekstu i musi mieć podobne pokrycie atramentem, inaczej oko czyta zmianę wartości
+jako migotanie (ta sama zasada co `INK_COVERAGE` w rampach).
 
 Ekrany: ekwipunek, karta postaci, dziennik, mapa lokalna (rzut z góry z bufora komórek),
 mapa świata (kafle regionów), dialog, handel, odpoczynek/podróż.
@@ -549,7 +630,7 @@ piksela** (materiał albo klasa powierzchni). Wtedy test czyta ten kanał, a ren
 nie musi wiedzieć, że jest testowany. Dopóki bufor ma tylko znak i barwę, hak zostaje —
 z tym wpisem, żeby nie udawał, że jest częścią modelu.
 
-### 10.2 Kolizja nie zna `SpanFlags.Stairs` — spłata w **M3**, razem z fizyką
+### 10.2 Kolizja nie zna `SpanFlags.Stairs` — **nie spłacone w M3**, termin: M4
 
 Ruch gracza zna jeden próg: `STEP_UP = 0,6 m`. Schodów nie rozpoznaje, mimo że
 flaga `Stairs` istnieje i generator ją ustawia. Skutek jest odwrotny do zamierzonego
@@ -563,8 +644,30 @@ na komórkę, bo tyle wolno. Kręte, strome zejście jest dziś niewyrażalne.
 
 Spłata: kolizja pytająca o flagę spanu — na `Stairs` obowiązuje inny próg (albo
 brak progu, z ograniczeniem prędkości). Wtedy `MAX_CLIMB` znika z generatora
-i długość biegu wraca do bycia decyzją kompozycyjną. Robimy to w M3, bo to ten
-sam obszar co reszta fizyki ruchu.
+i długość biegu wraca do bycia decyzją kompozycyjną.
+
+**Status po M3: nie spłacone.** Zlecenie M3 obejmowało postacie, walkę, ekwipunek
+i zapis; fizyki ruchu nie było na liście plików, a zmiana progu kolizji pociąga za sobą
+zmianę generatora lochu, czyli nowe złote pliki w module, którego M3 nie dotykało.
+Ruch potworów korzysta dziś z tej samej prymitywnej kolizji co gracz i ma ten sam
+problem: goblin nie wejdzie po schodach stromszych niż 0,55 m na komórkę. Termin
+przesunięty na M4, gdzie i tak wracamy do wejść i kompozycji lochu (§10.3).
+
+### 10.6 Klaster rozmnażania jest odtwarzany z pozycji bytu — do rewizji w M4
+
+Gobliny wychodzą z klastrów 16×16 komórek, a to, które klastry już wydały swoje byty,
+jest zapamiętane w zbiorze w pamięci (`Bestiary.seen`). W zapisie tego zbioru nie ma:
+po wczytaniu odtwarzamy go z **pozycji zapisanych bytów**. Działa to dokładnie tak
+długo, jak długo byt stoi w swoim klastrze. Potwór, który ścigał gracza przez trzy
+klastry i tam zginął, zostawia swój klaster nieoznaczony — i po wczytaniu ten klaster
+rodzi nowy komplet.
+
+Świadomie nie zapisujemy zbioru klastrów: rósłby bez ograniczeń wraz ze zwiedzonym
+terenem, a zapis ma być seedem plus deltami, nie dziennikiem odwiedzin. Właściwym
+rozwiązaniem jest identyfikator klastra **w bycie** (czyli byt pamiętający, skąd
+wyszedł — pole `Mob.origin` już istnieje, brakuje go w formacie zapisu) i podbicie
+`SAVE_VERSION`. Robimy to w M4 razem z frakcjami, bo wtedy i tak dochodzi
+przynależność bytu do grupy.
 
 ### 10.3 Wejście do jaskini jest kompozycją, nie emergentne — do rewizji w M4
 
