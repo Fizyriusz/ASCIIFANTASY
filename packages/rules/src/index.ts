@@ -39,3 +39,13 @@ export { cellLight, hasLineOfSight, canSee, canHear } from './perception.js';
 export type { SightGrid } from './perception.js';
 export { updateAi, serviceSwing, makeIntent } from './ai.js';
 export type { Intent } from './ai.js';
+export {
+  ItemKind,
+  makeInventory,
+  addItem,
+  removeItem,
+  syncWeight,
+  itemName,
+  itemWeight,
+} from './inventory.js';
+export type { Inventory, InventoryItem } from './inventory.js';

@@ -3,6 +3,7 @@ import { COMBAT, PLAYER, Weapon, Armor, armors, weapons } from '@rpg/content';
 import { Attr, Skill, Stance, makeActor, tickActor, loadFactor } from './actor.js';
 import { train } from './progress.js';
 import { equipArmor, equipWeapon, protectionOf, totalWeight, weaponOf, FISTS } from './equipment.js';
+import { addItem, ItemKind, makeInventory, removeItem } from './inventory.js';
 
 function player() {
   return makeActor(PLAYER.hp, PLAYER.stamina, PLAYER.attrs, PLAYER.skills);
@@ -74,15 +75,33 @@ describe('ekwipunek', () => {
     expect(weaponOf(player())).toBe(FISTS);
   });
 
-  it('zmiana broni przenosi wagę między slotem a plecakiem', () => {
+  it('zmiana broni przenosi wagę między plecakiem a ręką', () => {
     const a = player();
-    a.carriedKg = weapons[Weapon.Club]!.weightKg + weapons[Weapon.Dagger]!.weightKg;
+    const inv = makeInventory();
+    addItem(inv, ItemKind.Weapon, Weapon.Club, a);
+    addItem(inv, ItemKind.Weapon, Weapon.Dagger, a);
     const przed = totalWeight(a);
+
+    // dobycie maczugi: znika z plecaka, pojawia się w ręce — suma bez zmian
+    removeItem(inv, 0, a);
     equipWeapon(a, Weapon.Club);
     expect(totalWeight(a)).toBeCloseTo(przed, 5);
+
+    // zamiana na sztylet: maczuga wraca do plecaka
+    addItem(inv, ItemKind.Weapon, Weapon.Club, a);
+    removeItem(inv, inv.items.findIndex((i) => i.index === Weapon.Dagger), a);
     equipWeapon(a, Weapon.Dagger);
     expect(totalWeight(a)).toBeCloseTo(przed, 5);
     expect(a.carriedKg).toBeCloseTo(weapons[Weapon.Club]!.weightKg, 5);
+  });
+
+  it('waga plecaka wynika z listy, a nie z osobnego licznika', () => {
+    const a = player();
+    const inv = makeInventory();
+    addItem(inv, ItemKind.Armor, Armor.Mail, a);
+    expect(a.carriedKg).toBeCloseTo(armors[Armor.Mail]!.weightKg, 5);
+    removeItem(inv, 0, a);
+    expect(a.carriedKg).toBe(0);
   });
 
   it('zużyty pancerz chroni proporcjonalnie mniej', () => {

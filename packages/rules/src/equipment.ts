@@ -48,19 +48,19 @@ export function weaponWearFactor(a: Actor): number {
   return 1 - (a.weaponWear / 100) * 0.5;
 }
 
-/** Zakłada broń; poprzednia wraca do niesionej wagi, nowa z niej znika. */
+/**
+ * Zakłada broń. Zmienia **wyłącznie slot** — przenoszeniem przedmiotu między
+ * plecakiem a ręką zajmuje się `inventory.ts`, bo `carriedKg` ma jedno źródło
+ * prawdy i jest nim lista plecaka.
+ */
 export function equipWeapon(a: Actor, index: number | null): void {
-  if (a.weapon !== null) a.carriedKg += weapons[a.weapon]?.weightKg ?? 0;
   a.weapon = index;
   a.weaponWear = 0;
-  if (index !== null) a.carriedKg = Math.max(0, a.carriedKg - (weapons[index]?.weightKg ?? 0));
 }
 
 export function equipArmor(a: Actor, index: number | null): void {
-  if (a.armor !== null) a.carriedKg += armors[a.armor]?.weightKg ?? 0;
   a.armor = index;
   a.armorWear = 0;
-  if (index !== null) a.carriedKg = Math.max(0, a.carriedKg - (armors[index]?.weightKg ?? 0));
 }
 
 /** Łączna waga: niesione plus założone. Ta liczba idzie do udźwigu. */
