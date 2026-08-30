@@ -21,3 +21,15 @@ export {
   equipArmor,
   totalWeight,
 } from './equipment.js';
+export {
+  beginAttack,
+  beginBlock,
+  endBlock,
+  beginDodge,
+  stepCombat,
+  resolveAttack,
+  hitChance,
+  defenseOf,
+  makeAttackResult,
+} from './combat.js';
+export type { AttackResult } from './combat.js';
