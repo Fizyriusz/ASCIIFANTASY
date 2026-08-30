@@ -7,6 +7,7 @@ export default defineConfig({
       '@rpg/core': fileURLToPath(new URL('../../packages/core/src/index.ts', import.meta.url)),
       '@rpg/world': fileURLToPath(new URL('../../packages/world/src/index.ts', import.meta.url)),
       '@rpg/content': fileURLToPath(new URL('../../packages/content/src/index.ts', import.meta.url)),
+      '@rpg/rules': fileURLToPath(new URL('../../packages/rules/src/index.ts', import.meta.url)),
     },
   },
 });
