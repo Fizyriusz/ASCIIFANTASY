@@ -25,6 +25,7 @@ import {
   makeBeing,
   makeIntent,
   serviceSwing,
+  Swing,
   updateAi,
 } from '@rpg/rules';
 import type { AttackResult, Being, Intent } from '@rpg/rules';
@@ -63,6 +64,12 @@ export interface MobReport {
   dodged: boolean;
   /** ...albo po prostu chybił */
   missed: boolean;
+  /**
+   * Zamach doszedł do końca, ale nie miał kogo dosięgnąć — cel był poza zasięgiem
+   * albo poza łukiem ciosu. To jest legalny wynik walki i **musi** być widoczny:
+   * cichy brak wyniku sprawiał, że potwór machał pałką bez żadnego efektu.
+   */
+  whiffed: boolean;
 }
 
 /** Skompilowane rysunki, po jednym na rodzaj bytu. Kompilacja jest jednorazowa. */
@@ -255,6 +262,7 @@ export class Bestiary {
     report.blocked = false;
     report.dodged = false;
     report.missed = false;
+    report.whiffed = false;
 
     for (const m of this.mobs) {
       const b = m.being;
@@ -267,7 +275,10 @@ export class Bestiary {
       b.lum = this.lumAt(rig, b.x, b.y, b.z);
       updateAi(b, player, this.world, dtMs, rng, m.intent, CELL_METERS);
       this.moveBeing(b, m.intent, dtMs);
-      if (serviceSwing(b, player, dtMs, rng, out, CELL_METERS)) {
+      const cios = serviceSwing(b, player, dtMs, rng, out, CELL_METERS);
+      if (cios === Swing.OutOfReach || cios === Swing.OffAngle) {
+        report.whiffed = true;
+      } else if (cios === Swing.Resolved) {
         report.swung = true;
         report.damage += out.damage;
         if (out.blocked) {
@@ -415,6 +426,22 @@ export class Bestiary {
       // komory za graczem, inaczej odrodziłby ją po wczytaniu (dług 10.6).
       if (e.origin !== '') this.seen.add(e.origin);
     }
+  }
+
+  /**
+   * Czy w tym miejscu stoi żywy byt. Gra pyta o to przy ruchu gracza: ciała są
+   * nieprzenikalne, bo wejście w potwora psuje i obraz (sprite w kamerze),
+   * i mechanikę (łuk ciosu liczony z zerowego dystansu).
+   */
+  occupied(x: number, y: number, promienM: number): boolean {
+    const r = (promienM / CELL_METERS) ** 2;
+    for (const m of this.mobs) {
+      if (m.being.actor.stance === Stance.Dead) continue;
+      const dx = m.being.x - x;
+      const dy = m.being.y - y;
+      if (dx * dx + dy * dy < r) return true;
+    }
+    return false;
   }
 
   /** Żywy byt najbliżej gracza — HUD pokazuje, na co właśnie patrzymy. */

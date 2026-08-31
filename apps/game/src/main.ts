@@ -40,6 +40,7 @@ import {
   removeItem,
   serviceSwing,
   stepCombat,
+  Swing,
   syncWeight,
   weaponOf,
   ItemKind,
@@ -211,7 +212,14 @@ const bestiary = new Bestiary(SEED, world);
 const attack = makeAttackResult();
 /** Losowość walki. Osobny strumień od świata, żeby ruch gracza nie zmieniał terenu. */
 const combatRng = mulberry32(SEED ^ 0x00c0ffee);
-const mobReport: MobReport = { damage: 0, swung: false, blocked: false, dodged: false, missed: false };
+const mobReport: MobReport = {
+  damage: 0,
+  swung: false,
+  blocked: false,
+  dodged: false,
+  missed: false,
+  whiffed: false,
+};
 /** ile żagwi świeci w tej klatce — do HUD-u, bo limit zestawu jest cichy */
 let zrodel = 0;
 /** ms: ile jeszcze trwa reakcja kadru na oberwanie (przyciemnienie + drganie) */
@@ -379,7 +387,14 @@ function playerCombat(dtMs: number): void {
     stepCombat(player.actor, dtMs);
     return;
   }
-  if (!serviceSwing(player, target.being, dtMs, combatRng, attack, CELL_METERS)) return;
+  const cios = serviceSwing(player, target.being, dtMs, combatRng, attack, CELL_METERS);
+  if (cios === Swing.None) return;
+  if (cios !== Swing.Resolved) {
+    // Cios doszedł, ale nie miał kogo dosięgnąć. To jest wynik, a nie brak wyniku —
+    // bez tego wpisu gracz nie odróżnia „za daleko" od „nic się nie stało".
+    note(cios === Swing.OutOfReach ? 'cios w powietrze — za daleko' : 'cios w powietrze', EventKind.Neutral);
+    return;
+  }
 
   if (attack.killed) {
     bestiary.markHit(target);
@@ -657,6 +672,9 @@ window.addEventListener('resize', resize);
  * ściana i głębina; reszta to zakres późniejszych zadań.
  */
 function tryMove(nx: number, ny: number): void {
+  // Ciała są nieprzenikalne. Bez tego gracz wchodził w potwora (zmierzone 0,00 m
+  // dystansu), a odsuwający się byt wyglądał, jakby dawał się przepychać.
+  if (bestiary.occupied(nx, ny, MOVE.bodyRadiusM * 2)) return;
   const cx = Math.floor(nx);
   const cy = Math.floor(ny);
   const feet = eyeTarget - PLAYER_EYE;
@@ -775,6 +793,10 @@ function frame(t: number): void {
       note('uskoczyłeś', EventKind.Good);
     } else if (mobReport.missed) {
       note('minął cię', EventKind.Neutral);
+    } else if (mobReport.whiffed) {
+      // zamach, który nie miał czego dosięgnąć — też jest informacją: byłeś poza
+      // zasięgiem jego pałki, więc ten moment jest twoją okazją
+      note('goblin machnął w powietrze', EventKind.Neutral);
     }
     if (player.actor.hp <= 0 && player.actor.stance === Stance.Dead) {
       deathCause = 'zabity przez goblina';
