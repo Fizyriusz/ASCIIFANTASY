@@ -74,6 +74,14 @@ export const COMBAT = {
   staggerBelowStamina: 12,
   /** ms: ile trwa wytrącenie */
   staggerMs: 500,
+  /**
+   * ms: ile najwyżej trwa **jedno** cofnięcie wyczerpanego bytu. Bez budżetu
+   * czasowego cofanie nie ma końca: gracz naciera, byt spełnia warunek „przeciwnik
+   * w zasięgu" w każdej klatce i wycofuje się w nieskończoność, co w grze wygląda
+   * jak przepychanie potwora chodzeniem. Po wyczerpaniu budżetu byt staje i się
+   * zasłania — a to jest czytelny sygnał „teraz go masz".
+   */
+  retreatMs: 900,
 
   /**
    * Rozwój przez użycie: przyrost punktów przy umiejętności 0. Wartość jest mała
@@ -127,6 +135,13 @@ export const MOVE = {
   runStaminaPerSec: 9,
   /** radiany na sekundę: jak szybko byt obraca się w stronę celu */
   turnRate: 3.2,
+  /**
+   * metry: promień ciała. Dwa byty nie zbliżą się bardziej niż na jego dwukrotność.
+   * Bez tego gracz **wchodził w potwora**: pomiar dał dystans 0,00 m po dziesięciu
+   * sekundach nacierania, a wtedy sprite jest w kamerze, łuk ciosu przestaje cokolwiek
+   * znaczyć, a odsuwanie się bytu czyta się jak przepychanie go chodzeniem.
+   */
+  bodyRadiusM: 0.55,
 } as const;
 
 /**
