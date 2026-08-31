@@ -11,11 +11,19 @@ nie ma zielonych testów i grywalnego buildu.
 | M1b | [LOD sylwetkowy](M1b-lod-sylwetkowy.md) — **warunkowy** | niepotrzebny (pomiar M1 §7) | widok na dolinę |
 | M1c | [Stabilność tekstury](M1c-stabilnosc-tekstury.md) — **przed M2** | zrobione | fakturę ścian lochu |
 | M2 | [Wnętrza, lochy, światło](M2-wnetrza-loch-swiatlo.md) | zrobione | skradanie, eksplorację |
-| M2c | [Górny front: bryła wisząca to nie sufit](M2c-gorny-front.md) — **przed M3** | do zrobienia | sprite’y, które nie znikają |
-| M3 | [Postacie, walka, ekwipunek, zapis](M3-postacie-walka-zapis.md) | — | rozgrywkę |
+| M2c | [Górny front: bryła wisząca to nie sufit](M2c-gorny-front.md) — **przed M3** | zrobione | sprite’y, które nie znikają |
+| M3 | [Postacie, walka, ekwipunek, zapis](M3-postacie-walka-zapis.md) | zrobione, czeka na odbiór | rozgrywkę |
+| M3b | [Czytelność walki](M3b-czytelnosc-walki.md) | zrobione, czeka na odbiór | walkę, którą da się czytać |
+| M3c | [Bryła stworzeń](M3c-bryla-stworzen.md) | do zrobienia, **po M3d** | czworonogi i pająki |
+| M3d | [Zawartość lochu: mieszkańcy i światło](M3d-zawartosc-lochu.md) | do zrobienia, **najpierw** | loch, który jest miejscem |
 | M4 | Miasteczko ([szkic](M4-M6-szkic.md)) | — | świat, który żyje |
 | M5 | Questy ([szkic](M4-M6-szkic.md)) | — | cel gry |
 | M6 | Region ([szkic](M4-M6-szkic.md)) | — | skalę |
+
+M3d wykonujemy **przed** M3c: pusty loch to brak zawartości, a proporcje sprite'ów
+przy obrocie to jakość tego, co już jest. Kolejność wynika z tego, że M3c stroi rzut
+stworzeń, a M3d dopiero daje stworzenia, na których widać efekt — w lochu, czyli
+tam, gdzie sprite stoi najbliżej oka.
 
 M2c wykonujemy **przed** M3, nie po: sprite’y potworów i łupu są bryłami wiszącymi
 i wejdą dokładnie w ten kod, w którym siedzi błąd. Wchodzenie w M3 bez tego znaczy,
