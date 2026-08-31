@@ -337,6 +337,20 @@ Koszt: 60 bytów w kadrze to **0,032 ms** średniej (`pnpm bench`, `sprite.bench
 przy renderze terenu rzędu 20 ms w vitest. Sprite'y nie są pozycją w budżecie klatki;
 bufor głębi kosztuje 4 bajty na komórkę, czyli 60 kB przy limicie 15 000 komórek.
 
+**Telegraf mieszka w górnym pasie rysunku** (M3b). Przy zwarciu — 1,4 m, czyli zasięg
+maczugi — widać **18% sylwetki**: głowę i barki, bo nogi są poza dolną krawędzią kadru.
+Dlatego klatka `Attack` rośnie w górę (uniesiona broń w wierszu, który w spokoju jest
+pusty), a nie w szerokość. Miara: procent **widocznych** komórek sprite'a, które różnią
+się między `Idle` a `Attack`, mierzony na 1,5 / 3 / 6 m — czyli tam, gdzie przeciwnik
+dosięga. Zmiana zapisana w wierszach poza ekranem nie istnieje.
+
+**Rozbłysk to podmiana barwy, nie podbicie jasności.** `SpriteInstance` ma opcjonalne
+`r`/`g`/`b` nadpisujące barwę na jedną klatkę. Luminancja powyżej jedynki jest przycinana
+przez `shade` do bieli, więc byt straciłby barwę zamiast błysnąć. Trafienie to klatka
+`Hit` przez 220 ms plus błysk 130 ms; cios **zablokowany** przez przeciwnika to sam
+błysk, bez klatki `Hit` — kontakt był, ale bez tej różnicy „zablokował" i „spudłowałeś"
+dają ten sam obraz.
+
 ### 3.5 Budżety
 
 | Element | Limit |
@@ -469,6 +483,18 @@ unik w ciemno jest gorszy niż unik w odpowiedzi na zamach.
 ją spowalnia (do 35% przy pełnym udźwigu i niżej już nie schodzi). Regeneracja hp
 z czasem zamienia wytrzymałość w dekorację, bo każde starcie da się przeczekać w kącie.
 
+**Wytrzymałość jest zasobem dzięki opóźnieniu regeneracji** (M3b): po zamachu, uniku
+i przebitym bloku nic nie wraca przez sekundę, czyli dłużej niż pełny cykl najwolniejszej
+broni. Dopóki bijesz, nie regenerujesz wcale. Za to sama regeneracja jest szybka (24/s),
+więc odpuszczenie ciosu na sekundę jest decyzją, a nie wyrokiem. Zmierzone: ciągły atak
+wyczerpuje pulę w 4,7–5,6 s każdą bronią (sztylet 14 ciosów, miecz 7, maczuga 5), przy
+starciu trwającym 5 s. Przed tą zmianą było to 15,7–21,3 s, czyli nigdy w trakcie walki.
+
+**Stan wyczerpania ma histerezę i jest ułamkiem puli**, nie liczbą punktów: wchodzi się
+poniżej 20% zapasu, wychodzi powyżej 34%. Próg pojedynczy migotał przy każdym tyknięciu
+regeneracji, a próg w punktach znaczyłby co innego dla gracza (pula 100) niż dla goblina
+(85).
+
 **Rozwój przez użycie**, logarytmiczny: 0→100 kosztuje około 2500 udanych zastosowań,
 czyli godziny gry. Nieudana próba też uczy, ćwiartką przyrostu — inaczej optymalną
 strategią jest bicie najsłabszego przeciwnika w grze.
@@ -482,6 +508,14 @@ kanałem i nie zależy od światła. AI to pięć stanów i `switch`
 innym, bo przeciwnik walczący do śmierci sprawia, że świat wydaje się mechaniczny.
 AI **nie porusza bytem** — zapisuje zamiar (`Intent`), a przesunięcie z kolizją robi
 warstwa gry tym samym kodem, którym rusza graczem.
+
+Trzy reguły walki wręcz wyszły dopiero z symulacji grupy (M3b) i wszystkie dotyczą
+dystansu. Byt w `fighting` **domyka odległość**, gdy odpłynął ponad 0,9 swojego zasięgu —
+bez tego wystarczyło jedno cofnięcie, żeby stanął 2,6 m od gracza: poza własnym zasięgiem,
+ale wciąż „w walce", i starcie nie kończyło się nigdy. Wyczerpany **cofa się tylko
+o krok** (1,4 zasięgu) i tam łapie oddech; cofanie bez granicy zamieniało walkę w pogoń,
+w której szybszy jest ten, kto akurat nie może bić. Oba zachowania są przy okazji
+czytelnym sygnałem dla gracza — cofający się potwór znaczy „teraz jest twoja chwila".
 
 Magia (konstruktor zaklęć) i poziom postaci z sumy umiejętności — po M3, osobnym
 zadaniem. Konstruktor zaklęć jest projektem sam w sobie i nie mieści się w tym etapie.
@@ -501,6 +535,19 @@ nie inwersja koloru** (inwersja wymagałaby drugiego kanału na komórkę, a zna
 też w zrzucie snapshotowym), a **pasek wypełnia się `#`, nie blokiem** — stoi obok
 tekstu i musi mieć podobne pokrycie atramentem, inaczej oko czyta zmianę wartości
 jako migotanie (ta sama zasada co `INK_COVERAGE` w rampach).
+
+**Linia zdarzeń** (M3b, `log.ts`): dwie–trzy ostatnie rzeczy, które się stały, gasnące
+po sekundzie. Błysk i klatka trafienia mówią, *że* coś się stało; nie mówią *dlaczego*.
+„Przegrałem, bo zaatakowałem w odbiciu" jest zdaniem, nie obrazem — a w medium bez
+dźwięku i bez cząsteczek tekst jest naturalnym kanałem sprzężenia zwrotnego i idzie do
+tego samego bufora znaków co świat. Wpisy nazywają przyczynę („zablokowane", „brak
+wytrzymałości"), nie liczbę; powtórzony wpis odświeża istniejący, zamiast wypychać
+kolejkę. To nie są unoszące się liczby obrażeń: stała pozycja, stała długość kolejki.
+
+**Przyciemnienie kadru** (`fx.ts`) jest jedynym efektem działającym na cały bufor —
+odpowiedzią na oberwanie. Uwaga na miarę: efekt globalny zmienia każdą komórkę, więc
+snapshot niczego o nim nie powie. Mierzy się go spadkiem średniej luminancji, a snapshot
+robi z klatki po wygaśnięciu.
 
 Ekrany: ekwipunek, karta postaci, dziennik, mapa lokalna (rzut z góry z bufora komórek),
 mapa świata (kafle regionów), dialog, handel, odpoczynek/podróż.
