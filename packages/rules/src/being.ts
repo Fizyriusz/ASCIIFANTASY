@@ -32,6 +32,16 @@ export interface Being {
   /** radiany: w którą stronę patrzy */
   yaw: number;
   /**
+   * radiany: kąt patrzenia w pionie, dodatni w górę. Dla gracza to `cam.pitch`,
+   * dla bytu — elewacja na środek sylwetki celu. Od M3f rozstrzyga o trafieniu,
+   * więc jest częścią stanu bytu, a nie tylko kamery.
+   */
+  pitch: number;
+  /** metry: wysokość sylwetki; wyznacza okno pionowe, w które trzeba wycelować */
+  heightM: number;
+  /** metry: wysokość barków nad gruntem — stąd wychodzi cios i stąd liczy się okno */
+  eyeM: number;
+  /**
    * Czy byt biegnie. Ustawia to ten, kto nim rusza — gra dla gracza, AI dla potworów.
    * Percepcja czyta to pole u **obserwowanego**, bo hałas jest cechą tego, kto się
    * porusza, a nie tego, kto słucha.
@@ -70,13 +80,28 @@ export interface Being {
   holdMs: number;
 }
 
-export function makeBeing(actor: Actor, x: number, y: number, z: number, yaw: number, kind: number, walkMps: number, runMps: number): Being {
+export function makeBeing(
+  actor: Actor,
+  x: number,
+  y: number,
+  z: number,
+  yaw: number,
+  kind: number,
+  walkMps: number,
+  runMps: number,
+  /** domyślnie humanoid: byt bez podanej bryły zachowuje się jak goblin czy człowiek */
+  heightM = 1.8,
+  eyeM = 1.55,
+): Being {
   return {
     actor,
     x,
     y,
     z,
     yaw,
+    pitch: 0,
+    heightM,
+    eyeM,
     running: false,
     lum: 1,
     kind,

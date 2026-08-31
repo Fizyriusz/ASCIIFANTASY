@@ -70,10 +70,12 @@ export const Swing = {
   None: 0,
   /** cios doszedł i został rozstrzygnięty — szczegóły w `AttackResult` */
   Resolved: 1,
-  /** cios doszedł, ale cel był poza zasięgiem broni */
+  /** cios doszedł, ale cel był poza zasięgiem broni (poziomo albo pionowo) */
   OutOfReach: 2,
-  /** cios doszedł, ale cel był poza łukiem ciosu */
+  /** cios doszedł, ale cel był poza łukiem ciosu w poziomie */
   OffAngle: 3,
+  /** cios doszedł, ale patrzenie minęło sylwetkę w pionie — nad głową albo pod stopami */
+  OffAim: 4,
 } as const;
 export type Swing = (typeof Swing)[keyof typeof Swing];
 
@@ -96,9 +98,33 @@ export function serviceSwing(
   const distM = Math.sqrt(dx * dx + dy * dy) * metersPerCell;
   // zasięg broni plus pół metra na objętość obu ciał
   if (distM > reachOf(self)) return Swing.OutOfReach;
+
   const kat = Math.atan2(dy, dx) - self.yaw;
   // cios idzie do przodu; obrót w trakcie zamachu nie naprowadza go na cel
-  if (Math.abs(Math.atan2(Math.sin(kat), Math.cos(kat))) > 0.9) return Swing.OffAngle;
+  if (Math.abs(Math.atan2(Math.sin(kat), Math.cos(kat))) > COMBAT.swingArcRad) {
+    return Swing.OffAngle;
+  }
+
+  // Wysokość, z której wychodzi cios, i przedział wysokości, jaki zajmuje cel.
+  const barki = self.z + self.eyeM;
+  const stopy = foe.z;
+  const glowa = foe.z + foe.heightM;
+
+  // Zasięg pionowy: rozstrzyga tam, gdzie kąt patrzenia niczego nie ogranicza —
+  // po stronie AI, która celuje w środek sylwetki. To jest warunek, przez który
+  // byt stojący na przęśle mostu nie dosięga tego pod spodem.
+  if (glowa < barki - COMBAT.verticalReachM || stopy > barki + COMBAT.verticalReachM) {
+    return Swing.OutOfReach;
+  }
+
+  // Okno pionowe patrzenia: sylwetka zajmuje **przedział** kątów, nie punkt, więc
+  // porównujemy przedział z przedziałem. Margines z contentu rozszerza go z obu stron.
+  const doGlowy = Math.atan2(glowa - barki, distM);
+  const doStop = Math.atan2(stopy - barki, distM);
+  if (self.pitch > doGlowy + COMBAT.aimMarginRad || self.pitch < doStop - COMBAT.aimMarginRad) {
+    return Swing.OffAim;
+  }
+
   resolveAttack(self.actor, foe.actor, rng, out);
   return Swing.Resolved;
 }
@@ -180,6 +206,12 @@ export function updateAi(
 
     case AiState.Fighting: {
       turnTowards(self, player.x, player.y, dtMs);
+      // Byt celuje w środek sylwetki gracza. Bez tego okno pionowe z `serviceSwing`
+      // odrzucałoby każdy jego cios, bo `pitch` bytu zostawałby zerem.
+      self.pitch = Math.atan2(
+        player.z + player.heightM * 0.5 - (self.z + self.eyeM),
+        Math.max(0.1, Math.sqrt(dx * dx + dy * dy) * metersPerCell),
+      );
       if (distM > reach * 1.6 || !widzi) {
         enter(self, AiState.Hunting);
         break;
