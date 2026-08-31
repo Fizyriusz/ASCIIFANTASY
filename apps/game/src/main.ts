@@ -23,7 +23,7 @@ import {
   saveToStorage,
   serialize,
 } from '@rpg/world';
-import type { GameSave } from '@rpg/world';
+import type { DungeonGraph, GameSave } from '@rpg/world';
 import {
   Stance,
   addItem,
@@ -405,11 +405,32 @@ function playerCombat(dtMs: number): void {
  * biegu. Wraca tam, skąd skoczyłeś, więc nie gubi kontekstu.
  */
 let jumpBack: { x: number; y: number; yaw: number } | null = null;
+/** loch, po którym chodzimy klawiszem `G`, i przystanek w nim (0 = wejście) */
+let caveGraph: DungeonGraph | null = null;
+let caveStop = 0;
 
 function jumpToCave(): void {
+  // Trzy przystanki, nie dwa: wejście → komora → powrót. Komora doszła w M3d,
+  // bo zawartość lochu (mieszkańcy, żagwie) zaczyna się dopiero pod stropem,
+  // a dojście tam od wejścia to kilkanaście sekund biegu przy każdym sprawdzeniu.
+  if (jumpBack !== null && caveGraph !== null && caveStop === 0) {
+    const g = caveGraph;
+    // najgłębsza komora: tam kończy się loch i tam warto zajrzeć najpierw
+    let best = g.rooms[0];
+    for (const r of g.rooms) {
+      if (best === undefined || r.level > best.level) best = r;
+    }
+    if (best !== undefined) {
+      caveStop = 1;
+      land(best.x + best.w / 2, best.y + best.h / 2, 0, best.ceilZ);
+      return;
+    }
+  }
   if (jumpBack !== null) {
     const back = jumpBack;
     jumpBack = null;
+    caveGraph = null;
+    caveStop = 0;
     land(back.x, back.y, back.yaw);
     return;
   }
@@ -427,6 +448,8 @@ function jumpToCave(): void {
   }
   if (best === null) return;
   jumpBack = { x: cam.x, y: cam.y, yaw: cam.yaw };
+  caveGraph = best;
+  caveStop = 0;
   // kolano wcięcia: stoi się w wąwozie, twarzą do wylotu tunelu
   land(
     best.mouthX + best.mouthDirX * 4 + 0.5,
@@ -435,12 +458,18 @@ function jumpToCave(): void {
   );
 }
 
-function land(x: number, y: number, yaw: number): void {
+/**
+ * Stawia gracza w podanym miejscu. `maxZ` jest pułapem szukania gruntu i jest
+ * konieczny przy skoku do komory lochu: bez niego `surfaceHeight` znajduje
+ * najwyższą czapkę, czyli **łąkę nad lochem**, i teleport ląduje na trawie
+ * zamiast pod ziemią.
+ */
+function land(x: number, y: number, yaw: number, maxZ = 1e6): void {
   cam.x = x;
   cam.y = y;
   cam.yaw = yaw;
   world.loadRing(cam);
-  const surf = world.surfaceHeight(Math.floor(x), Math.floor(y), 1e6);
+  const surf = world.surfaceHeight(Math.floor(x), Math.floor(y), maxZ);
   if (Number.isFinite(surf)) {
     eyeTarget = surf + PLAYER_EYE;
     cam.eyeZ = eyeTarget;
@@ -825,7 +854,7 @@ function drawHud(): void {
   screen.text(
     1,
     screen.rows - 1,
-    'WASD, LPM cios, PPM blok, Spacja unik, I plecak, C karta, F5/F9 zapis, F6/F7 plik, F pochodnia, G jaskinia',
+    'WASD, LPM cios, PPM blok, Spacja unik, I plecak, C karta, F5/F9 zapis, F6/F7 plik, F pochodnia, G jaskinia/komora',
     HUD_DIM,
   );
 

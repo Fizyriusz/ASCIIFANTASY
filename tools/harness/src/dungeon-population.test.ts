@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { createLightRig } from '@rpg/core';
+import { clearSources, createLightRig, renderWorld } from '@rpg/core';
 import { WILD_SPAWN, wildPack } from '@rpg/content';
-import { CELL_METERS, ChunkStore, dungeonDwellers, dungeonsNear, h32 } from '@rpg/world';
+import { CELL_METERS, ChunkStore, dungeonDwellers, dungeonLights, dungeonsNear, h32 } from '@rpg/world';
 import type { DungeonGraph } from '@rpg/world';
 import { Bestiary } from '../../../apps/game/src/entities.js';
+import { assertSnapshot } from './snapshot.js';
+import { dungeonScene, referenceScreen } from './scene.js';
 
 const SEED = 4242;
 const START_X = 128.5;
@@ -184,5 +186,59 @@ describe('pomiar: czy powierzchnia się wyludnia', () => {
         `wystawionych ${ok}`,
     );
     expect(zamieszkanych).toBeGreaterThan(0);
+  });
+});
+
+describe('żagiew widać w kadrze', () => {
+  it('dungeon-room-brazier: komora z żagwią jest jaśniejsza niż sama pochodnia', () => {
+    // Snapshot i liczba naraz: obraz pokazuje, że światło ma kształt, a średnia
+    // luminancja pilnuje, że w ogóle świeci. Bez tej drugiej miary snapshot
+    // przeszedłby także wtedy, gdyby żagiew nie dawała nic.
+    const g = najblizszyLoch();
+    const swiatla = dungeonLights(SEED, g);
+    expect(swiatla.length).toBeGreaterThan(0);
+    const l = swiatla[0]!;
+    const pokoj = g.rooms[l.roomIndex]!;
+
+    const s = dungeonScene('room');
+    const w = store(pokoj.x + pokoj.w / 2, pokoj.y + pokoj.h / 2);
+    // kamera w komorze z żagwią, zwrócona w jej stronę
+    const px = pokoj.x + 0.5;
+    const py = pokoj.y + 0.5;
+    s.camera.x = px;
+    s.camera.y = py;
+    s.camera.eyeZ = pokoj.floorZ + 1.7;
+    s.camera.yaw = Math.atan2(l.y / CELL_METERS - py, l.x / CELL_METERS - px);
+    s.camera.pitch = 0;
+    s.ctx.light.torchX = px * CELL_METERS;
+    s.ctx.light.torchY = py * CELL_METERS;
+    s.ctx.light.torchZ = s.camera.eyeZ;
+
+    const b = new Bestiary(SEED, w);
+    b.spawnAround(px, py, pokoj.floorZ);
+
+    const bezZagwi = referenceScreen();
+    clearSources(s.ctx.light);
+    renderWorld(w, s.camera, bezZagwi, s.ctx);
+
+    const zZagwia = referenceScreen();
+    const n = b.feedLights(s.ctx.light, px, py);
+    expect(n).toBeGreaterThan(0);
+    renderWorld(w, s.camera, zZagwia, s.ctx);
+    assertSnapshot('dungeon-room-brazier', zZagwia.toText());
+
+    const jasnosc = (scr: { colors: Int32Array | Uint16Array | Uint32Array }): number => {
+      let sum = 0;
+      for (let i = 0; i < scr.colors.length; i++) {
+        const p = scr.colors[i] ?? 0;
+        sum += ((p >> 10) & 31) + ((p >> 5) & 31) + (p & 31);
+      }
+      return sum / scr.colors.length;
+    };
+    console.log(
+      `komora ${l.roomIndex}: żagwi w zestawie ${n}, jasność bez ${jasnosc(bezZagwi).toFixed(2)}, ` +
+        `z żagwią ${jasnosc(zZagwia).toFixed(2)}`,
+    );
+    expect(jasnosc(zZagwia)).toBeGreaterThan(jasnosc(bezZagwi) * 1.1);
   });
 });
