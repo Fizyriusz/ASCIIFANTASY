@@ -240,7 +240,20 @@ export class Bestiary {
     if (def === undefined) throw new Error('paczka bez potworów');
     const actor = makeActor(def.hp, def.stamina, def.attrs, def.skills);
     equipWeapon(actor, def.weapon);
-    const being = makeBeing(actor, x, y, z, yaw, 0, def.walkMps, def.runMps);
+    // Bryła bytu idzie z contentu: od M3f wysokość sylwetki wyznacza okno pionowe,
+    // w które trzeba wycelować, więc goblin (1,4 m) wymaga innego kąta niż człowiek.
+    const being = makeBeing(
+      actor,
+      x,
+      y,
+      z,
+      yaw,
+      0,
+      def.walkMps,
+      def.runMps,
+      def.heightM,
+      def.heightM * 0.85,
+    );
     return { being, intent: makeIntent(), origin, flashMs: 0 };
   }
 

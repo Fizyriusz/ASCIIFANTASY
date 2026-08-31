@@ -50,8 +50,12 @@ import {
   drawCharacter,
   drawDeath,
   drawInventory,
+  drawCrosshair,
   drawLog,
+  drawSelf,
   dimScreen,
+  dodgeProgress,
+  windupProgress,
   makeEventLog,
   pushEvent,
   tickLog,
@@ -199,6 +203,8 @@ const player = makeBeing(
   -1,
   MOVE.walkMps,
   MOVE.runMps,
+  PLAYER_HEIGHT,
+  PLAYER_EYE,
 );
 equipWeapon(player.actor, Weapon.Shortsword);
 equipArmor(player.actor, Armor.Leather);
@@ -769,6 +775,8 @@ function frame(t: number): void {
   player.y = cam.y;
   player.z = eyeTarget - PLAYER_EYE;
   player.yaw = cam.yaw;
+  // Od M3f pion decyduje o trafieniu, więc kąt patrzenia jest częścią stanu bytu.
+  player.pitch = cam.pitch;
   player.running = (keys['ShiftLeft'] || keys['ShiftRight']) === true;
   player.lum = bestiary.lumAt(render.light, cam.x, cam.y, player.z);
 
@@ -819,6 +827,23 @@ function frame(t: number): void {
   drawSprites(screen, cam, render, bestiary.spriteList(), bestiary.mobs.length);
   cam.yaw = yaw0;
   cam.pitch = pitch0;
+
+  // Własne akcje rysują się na wierzchu geometrii, ale pod wskaźnikami: broń jest
+  // bliżej niż cokolwiek w świecie, a HUD ma zostać czytelny nawet w błysku.
+  if (panel === Panel.None) {
+    drawSelf(screen, {
+      windup: windupProgress(
+        player.actor.stanceMs,
+        weaponOf(player.actor),
+        player.actor.stance === Stance.Windup,
+      ),
+      blocking: player.actor.stance === Stance.Blocking,
+      dodge: player.actor.stance === Stance.Dodging ? dodgeProgress(player.actor.dodgeMs) : 0,
+      lum: player.lum,
+      weapon: weaponOf(player.actor),
+    });
+    drawCrosshair(screen, player.lum);
+  }
 
   if (hurtMs > 0) {
     // im bliżej końca efektu, tym jaśniej — przyciemnienie ma zakłuć, nie oślepić
