@@ -29,7 +29,7 @@ const def = wildCreatures[0];
 if (def === undefined) throw new Error('paczka bez potworów');
 const mobs: { being: Being; intent: Intent }[] = [];
 for (let i = 0; i < 60; i++) {
-  const a = makeActor(def.hp, 60, def.attrs, def.skills);
+  const a = makeActor(def.hp, def.stamina, def.attrs, def.skills);
   equipWeapon(a, def.weapon);
   const x = v.x + Math.cos(v.yaw) * (3 + (i % 20)) + ((i % 3) - 1);
   const y = v.y + Math.sin(v.yaw) * (3 + (i % 20)) + ((i % 5) - 2);

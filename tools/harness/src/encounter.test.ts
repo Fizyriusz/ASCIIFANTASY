@@ -36,7 +36,7 @@ function makePlayer(x: number, y: number, z: number, yaw: number, lum: number): 
 }
 
 function makeGoblin(x: number, y: number, z: number, yaw: number, lum: number): Being {
-  const a = makeActor(def!.hp, 60, def!.attrs, def!.skills);
+  const a = makeActor(def!.hp, def!.stamina, def!.attrs, def!.skills);
   equipWeapon(a, def!.weapon);
   const b = makeBeing(a, x, y, z, yaw, 0, def!.walkMps, def!.runMps);
   b.lum = lum;
