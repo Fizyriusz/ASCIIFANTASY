@@ -500,6 +500,19 @@ sztylet 180/200 ms, maczuga 460/520 ms przy dwa razy większych obrażeniach.
 `stepCombat` zwraca `true` dokładnie w klatce dojścia ciosu, a zasięg sprawdza warstwa,
 która zna pozycje (`serviceSwing`) — reguły walki nie znają geometrii.
 
+**Każdy zamach kończy się wynikiem.** `serviceSwing` zwraca `Swing`: rozstrzygnięty,
+poza zasięgiem albo poza łukiem ciosu — nigdy cicho. Wcześniej cios poza zasięgiem
+wychodził bez śladu i to była przyczyna błędu widocznego dopiero w grze: goblin machał
+pałką w kółko, nie zadając obrażeń i nie zostawiając wpisu w dzienniku (dziesięć takich
+zamachów na trzynaście). „Cios w powietrze" jest legalnym wynikiem walki; brak informacji
+nie jest. Z tego samego powodu AI zaczyna zamach **wyłącznie z zasięgu broni**
+(`reachOf` jest jedną definicją dla AI i dla rozstrzygania), a wyczerpany byt nie cofa
+się w trakcie własnego ciosu ani dłużej niż `COMBAT.retreatMs`.
+
+**Ciała są nieprzenikalne.** Ruch gracza pyta bestiariusz o zajęte miejsce; bez tego
+gracz wchodził w potwora (zmierzone 0,00 m dystansu po dziesięciu sekundach nacierania),
+a cofający się byt wyglądał, jakby dawał się przepychać chodzeniem.
+
 **Trafienie to jeden rzut**: `baza + umiejętność + zręczność − obrona`, klamrowany
 do 5–95%. Blok redukuje obrażenia i zjada wytrzymałość proporcjonalnie do tego, co
 zatrzymał — i pęka, gdy jej zabraknie. Unik ma krótkie okno i dłuższe odbicie, więc
@@ -628,6 +641,11 @@ Po M6: więcej contentu, nie więcej systemów. To jest moment, w którym takie 
 - **Właściwości symulacji** — po 365 dobach gry: brak ujemnych populacji, brak NaN w cenach,
   brak NPC uwięzionych w geometrii.
 - **Sanity questów** — 10 000 wygenerowanych instancji, żadna z nieosiągalnym slotem.
+- **Starcie idzie ścieżką gry.** Test walki wywołuje `Bestiary.step` i tę samą kolizję
+  ciał co ruch gracza — nie własną pętlę `x += vx * dt`. Powód jest z doświadczenia:
+  symulacja 10 000 pojedynków dawała medianę starcia 5,2 s, podczas gdy w grze walka
+  nie rozstrzygała się wcale, bo AI zapisuje `Intent`, a bytem rusza `apps/game`.
+  Test, który omija tę warstwę, przepuszcza regresję w niej.
 - **Budżet klatki** — test wydajności w CI, próg twardy.
 
 ---
