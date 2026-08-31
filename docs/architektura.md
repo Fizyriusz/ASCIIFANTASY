@@ -500,6 +500,22 @@ sztylet 180/200 ms, maczuga 460/520 ms przy dwa razy większych obrażeniach.
 `stepCombat` zwraca `true` dokładnie w klatce dojścia ciosu, a zasięg sprawdza warstwa,
 która zna pozycje (`serviceSwing`) — reguły walki nie znają geometrii.
 
+**Trafienie jest celowane, ale bez stref ciała** (M3f). Warunek dojścia ciosu czyta
+trzy rzeczy: odległość poziomą, łuk w poziomie (`COMBAT.swingArcRad`, 0,55 rad — węższy
+niż połowa pola widzenia, żeby nie dało się trafić czegoś poza ekranem) oraz **okno
+pionowe**. Sylwetka celu zajmuje przedział kątów, nie punkt, więc porównujemy przedział
+z przedziałem i rozszerzamy go o margines z contentu. Przy 2 m goblin zajmuje od −8,5°
+(czubek głowy) do −40,4° (stopy), co znaczy, że patrzenie poziomo przed siebie **go mija**
+— i to jest cała reguła: trzeba patrzeć na przeciwnika, a wysokość bytu zaczyna mieć
+znaczenie (na wilka niżej niż na trolla).
+
+Po stronie AI kąt patrzenia niczego by nie ograniczał, bo byt celuje w środek sylwetki,
+więc tam rozstrzyga **pionowy zasięg ciosu** (`COMBAT.verticalReachM`). To jest warunek,
+przez który byt z przęsła mostu nie dosięga tego pod spodem — i odwrotnie.
+
+Koszt zmierzony ścieżką gry: gracz celujący w przeciwnika traci **0%** ciosów nawet przy
+rozrzucie ±20°; gracz patrzący poziomo przed siebie traci 100%.
+
 **Każdy zamach kończy się wynikiem.** `serviceSwing` zwraca `Swing`: rozstrzygnięty,
 poza zasięgiem albo poza łukiem ciosu — nigdy cicho. Wcześniej cios poza zasięgiem
 wychodził bez śladu i to była przyczyna błędu widocznego dopiero w grze: goblin machał
@@ -574,6 +590,18 @@ nie inwersja koloru** (inwersja wymagałaby drugiego kanału na komórkę, a zna
 też w zrzucie snapshotowym), a **pasek wypełnia się `#`, nie blokiem** — stoi obok
 tekstu i musi mieć podobne pokrycie atramentem, inaczej oko czyta zmianę wartości
 jako migotanie (ta sama zasada co `INK_COVERAGE` w rampach).
+
+**Własne akcje** (M3f, `self.ts`): broń wchodzi w kadr od dołu przez czas zamachu swojej
+broni i znika w odbiciu — odbicie jest karą i ma wyglądać jak bezbronność. Blok jest
+**stanem**, więc jego znak jest stały i szeroki; unik jest **impulsem**, więc krótki
+i asymetryczny. Trzy różne decyzje mają wyglądać jak trzy różne rzeczy, a miarą tego jest
+próg 20 komórek różnicy między każdą parą postaw — ta sama miara, co przy wynikach ciosu
+w M3b. Do tego przygaszony celownik, bo od M3f pion decyduje o trafieniu i gracz musi
+widzieć, gdzie mierzy.
+
+Uwaga z pomiaru: pierwsza wersja rysunków broni miała 14 zamalowanych komórek i **nie
+przechodziła** progu 20 — sygnał, który w kodzie istnieje, a na ekranie ginie, jest
+sygnałem, którego nie ma.
 
 **Linia zdarzeń** (M3b, `log.ts`): dwie–trzy ostatnie rzeczy, które się stały, gasnące
 po sekundzie. Błysk i klatka trafienia mówią, *że* coś się stało; nie mówią *dlaczego*.
