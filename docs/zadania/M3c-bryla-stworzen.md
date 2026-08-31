@@ -82,6 +82,25 @@ Migracja: istniejące byty dostają `lengthM` równe dotychczasowej `widthM`, wi
 humanoidy renderują się prawie bez zmian (dla goblina różnica ×1,4 rozłoży się
 płynnie zamiast być stała).
 
+**Próg przełączenia sprite'a wynika z pudełka, nie jest stałą.** `pickFrame` dzieli
+dziś pełny obrót na cztery równe ćwiartki, czyli przełącza przód na bok przy 45°.
+To jest poprawne wyłącznie dla bytu o kwadratowej podstawie. Właściwa granica leży
+tam, gdzie rzut przestaje być bliższy szerokości niż długości:
+
+```
+θ_próg = arctan(widthM / lengthM)
+```
+
+Dla wilka (1,40 × 0,45 m) to **18°, nie 45°**. Skutek stałego progu jest zmierzony
+w edytorze: przy 45° sprite przodu, rysowany z siatki siedmiokolumnowej, jest
+rozciągany na **41 kolumn** — zniekształcenie **×2,8**, czyli obraz, który w edytorze
+nazwaliśmy harmonijką. Po przejściu na próg z pudełka ten sam kąt (33°) pokazuje już
+sprite boczny i zniekształcenie spada do **×1,15**.
+
+Dla humanoida `arctan(0,50 / 0,35)` wypada powyżej 45°, więc jego zachowanie zmienia się
+niewiele — a to jest dokładnie ta własność, której szukamy: próg ma wynikać z bryły,
+a nie z liczby kierunków.
+
 ### 2. Siatka źródłowa: większa i osobna per kierunek
 
 Siatka źródłowa jest dziś **węższym gardłem niż rozdzielczość ekranu**, i jest to
@@ -132,18 +151,36 @@ bez żadnych nowych znaków.
 Warunki: cień rysuje się tylko wtedy, gdy byt stoi na powierzchni (nie w locie, nie
 w wodzie powyżej pasa), i skaluje się z odległością tak samo jak sprite.
 
-### 5. Osiem kierunków — na końcu i tylko jeśli reszta trzyma budżet
+### 5. Osiem kierunków — obowiązkowe dla stworzeń wydłużonych
 
 Cztery kierunki po §1 dają już ciągłą zmianę szerokości, ale sylwetka nadal przeskakuje
-co 90°. Osiem kierunków to usuwa, kosztem rysowania.
+między czterema rysunkami. Osiem kierunków to usuwa, kosztem rysowania.
+
+**Reguła, kiedy cztery kierunki wystarczają:**
+
+> Cztery kierunki wystarczają, gdy `lengthM / widthM < 1,5`. Powyżej tego progu
+> stworzenie potrzebuje sprite'a ukośnego.
+
+Ta liczba jest z pomiaru, nie z gustu. Nawet z poprawnym progiem przełączania (§1)
+zostaje strefa **10–18°**, w której rysowany jest jeszcze sprite przodu, a rzut pudełka
+jest już wyraźnie szerszy — sprite przodu jest tam rozciągany **×1,7 do ×2,0**. Dla
+humanoidów i pająka (`lengthM / widthM` odpowiednio 0,7 i 1,0) ta strefa nie istnieje,
+bo próg z pudełka wypada powyżej 45°. Dla wilka (3,1) istnieje zawsze i nie da się jej
+usunąć inaczej niż piątym rysunkiem.
+
+Wniosek dla zakresu tego zlecenia: **dla wilka §5 nie jest opcjonalne**, dla goblina
+i pająka pozostaje opcjonalne i domyślnie pomijane.
 
 **Autoryzujesz pięć, trzy robisz lustrem**: przód, przód-lewy, lewy, tył-lewy, tył —
 reszta z odbicia. Uwaga: lustro psuje byty asymetryczne (broń w prawej ręce), więc
 definicja musi mieć flagę „nie odbijaj" i test, który pilnuje, że byt z taką flagą
 ma wszystkie osiem narysowanych.
 
-Jeśli po §1–§4 wilk czyta się dobrze, **napisz to i pomiń §5**. Czterdzieści klatek
-na stworzenie zamiast dwudziestu ośmiu to realny koszt każdego przyszłego potwora.
+Czterdzieści klatek na stworzenie zamiast dwudziestu ośmiu to realny koszt każdego
+przyszłego potwora, więc **§5 robimy wyłącznie tam, gdzie wymusza to reguła
+`lengthM / widthM ≥ 1,5`**. Dla stworzeń poniżej progu napisz w podsumowaniu, że
+zostały przy czterech kierunkach, i podaj ich stosunek — to jest tańsze niż rysunki,
+których nikt nie odróżni.
 
 ### 6. Wilk jako przypadek testowy
 
@@ -163,6 +200,18 @@ per kierunek — to zmiana w narzędziu, nie w grze).
    przesunięte snapshoty goblina — **opisane z diffem i powodem**.
 3. **Tabela rzutu przed i po**: szerokość wilka na ekranie z 6 m przy 0°, 30°, 60°, 90°.
    Po zmianie ma odpowiadać rzutowi pudełka z dokładnością do zaokrąglenia.
+3a. **Miernik zniekształcenia — dla każdego stworzenia, co 5° pełnego obrotu:**
+
+   ```
+   zniekształcenie = (kolumny_na_ekranie / szerokość_siatki)
+                     / (wiersze_na_ekranie / wysokość_siatki)
+   ```
+
+   Wartość ma być **poniżej 1,5 na każdym kącie**. To jest tania miara — liczy się
+   z samych liczb, bez renderu — i wyłapuje brakujący kierunek, zanim zobaczysz go
+   w grze: sprite rozciągany dwukrotnie w poziomie to dokładnie ten obraz, który
+   w edytorze wyglądał jak harmonijka. Wynik podaj jako maksimum i kąt, na którym
+   wypadło, osobno dla każdego stworzenia.
 4. **Metryki M3b przeliczone od nowa.** Większa siatka i cieniowanie zmieniają kontrast
    do tła i procent różnicy telegrafu — obie miary z M3b muszą zostać zmierzone
    ponownie i nadal przechodzić. Jeśli któraś spadnie poniżej progu, to jest regresja
