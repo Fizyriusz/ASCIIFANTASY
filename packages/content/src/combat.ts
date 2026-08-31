@@ -13,6 +13,26 @@ export const COMBAT = {
   hitPerSkill: 0.004,
   /** wkład zręczności (0..100) atakującego */
   hitPerAgi: 0.002,
+  /**
+   * radiany: połowa łuku ciosu w poziomie. Schodzi z 0,9 do 0,55, bo 0,9 rad to 51,6°
+   * przy polu widzenia ±37° — łuk był **szerszy niż ekran**, czyli dawało się trafić
+   * coś, czego nie widać.
+   */
+  swingArcRad: 0.55,
+  /**
+   * radiany: margines okna pionowego. Cel jest trafiony, gdy kąt elewacji patrzenia
+   * mieści się w kącie, jaki zajmuje sylwetka celu, powiększonym o tyle z każdej
+   * strony. Przy 2 m sylwetka goblina zajmuje od −9° (głowa) do −40° (stopy), więc
+   * margines 8° robi z tego okno 47° — hojne, ale wymuszające patrzenie **na**
+   * przeciwnika, a nie nad niego.
+   */
+  aimMarginRad: 0.14,
+  /**
+   * metry: pionowy zasięg ciosu wokół wysokości barków. Rozstrzyga po stronie AI
+   * (byt celuje w środek sylwetki, więc kąt patrzenia niczego by nie ograniczył)
+   * i domyka przypadek przęsła mostu: stojący wyżej nie dosięga tego pod spodem.
+   */
+  verticalReachM: 1.1,
   /** dolna i górna granica — zawsze zostaje ryzyko i zawsze zostaje szansa */
   hitMin: 0.05,
   hitMax: 0.95,

@@ -32,6 +32,13 @@ export interface WeaponDef {
   skill: WeaponSkill;
   /** ile punktów zużycia (0..100) dodaje jedno trafienie */
   wearPerHit: number;
+  /**
+   * Rysunek broni w kadrze pierwszoosobowym: wiersze od góry, spacja przezroczysta.
+   * Wchodzi w kadr od dołu przez czas zamachu, więc różnica długości między sztyletem
+   * a maczugą ma być widoczna od razu — to ona odróżnia te bronie w mechanice
+   * (180 / 320 / 460 ms), a nie sama liczba obrażeń.
+   */
+  view: readonly string[];
 }
 
 export interface ArmorDef {
@@ -62,6 +69,7 @@ export const weapons: readonly WeaponDef[] = [
     weightKg: 0.6,
     skill: WeaponSkill.Blade,
     wearPerHit: 0.4,
+    view: ['  ^  ', ' (|) ', '  |  ', '  =  '],
   },
   {
     id: 'shortsword',
@@ -75,6 +83,7 @@ export const weapons: readonly WeaponDef[] = [
     weightKg: 1.4,
     skill: WeaponSkill.Blade,
     wearPerHit: 0.3,
+    view: ['  ^  ', '  #  ', '  #  ', '  #  ', '-=+=-', '  |  '],
   },
   {
     id: 'club',
@@ -88,6 +97,7 @@ export const weapons: readonly WeaponDef[] = [
     weightKg: 2.6,
     skill: WeaponSkill.Blunt,
     wearPerHit: 0.2,
+    view: [' ### ', ' ### ', ' ### ', '  #  ', '  |  ', '  |  ', '  |  '],
   },
 ];
 

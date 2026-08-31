@@ -23,6 +23,7 @@ export const FISTS: WeaponDef = {
   weightKg: 0,
   skill: WeaponSkill.Blunt,
   wearPerHit: 0,
+  view: ['  _  ', ' (#) ', '  |  '],
 };
 
 export function weaponOf(a: Actor): WeaponDef {
