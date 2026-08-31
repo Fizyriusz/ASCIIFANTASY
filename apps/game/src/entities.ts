@@ -14,7 +14,7 @@
 
 import { compileSprite, lightAt } from '@rpg/core';
 import type { LightRig, SpriteFrames, SpriteInstance } from '@rpg/core';
-import { Frame, wildCreatures } from '@rpg/content';
+import { FEEDBACK, Frame, WILD_SPAWN, wildCreatures } from '@rpg/content';
 import { CELL_METERS, h32 } from '@rpg/world';
 import type { ChunkStore } from '@rpg/world';
 import {
@@ -43,6 +43,25 @@ export interface Mob {
   intent: Intent;
   /** klucz klastra, z którego wyszedł — żeby nie odrodzić go po śmierci */
   origin: string;
+  /** ms: ile jeszcze trwa rozbłysk trafienia na sylwetce */
+  flashMs: number;
+}
+
+/**
+ * Co byty zrobiły graczowi w tej klatce. Jeden obiekt na całą pętlę, nadpisywany —
+ * warstwa gry robi z tego wpisy do dziennika i efekty w kadrze.
+ */
+export interface MobReport {
+  /** obrażenia, które doszły do gracza */
+  damage: number;
+  /** ktoś zamachnął się i cios doszedł do rozstrzygnięcia */
+  swung: boolean;
+  /** ...i został zatrzymany blokiem gracza */
+  blocked: boolean;
+  /** ...albo minął, bo gracz uskoczył */
+  dodged: boolean;
+  /** ...albo po prostu chybił */
+  missed: boolean;
 }
 
 /** Skompilowane rysunki, po jednym na rodzaj bytu. Kompilacja jest jednorazowa. */
@@ -82,10 +101,11 @@ export class Bestiary {
 
   private spawnCluster(kx: number, ky: number, pz: number): void {
     const h = h32(this.seed ^ 0x60b1, kx, ky, 0) >>> 0;
-    // co ósmy klaster jest zamieszkany — rzadziej i świat jest pusty,
-    // częściej i las zamienia się w arenę
-    if (h % 8 !== 0) return;
-    const count = 1 + ((h >>> 8) % 3);
+    // Gęstość i rozmiar grupy są w contencie, bo to liczby balansu: groźba ma
+    // wychodzić z liczebności, a nie z siły pojedynczego przeciwnika.
+    if (h % WILD_SPAWN.oneInClusters !== 0) return;
+    const rozpietosc = WILD_SPAWN.packMax - WILD_SPAWN.packMin + 1;
+    const count = WILD_SPAWN.packMin + ((h >>> 8) % rozpietosc);
     for (let i = 0; i < count; i++) {
       if (this.mobs.length >= MAX_BEINGS) return;
       const hp = h32(h, i, 0, 0) >>> 0;
@@ -108,7 +128,7 @@ export class Bestiary {
     const actor = makeActor(def.hp, 60, def.attrs, def.skills);
     equipWeapon(actor, def.weapon);
     const being = makeBeing(actor, x, y, z, yaw, 0, def.walkMps, def.runMps);
-    return { being, intent: makeIntent(), origin };
+    return { being, intent: makeIntent(), origin, flashMs: 0 };
   }
 
   /**
@@ -116,21 +136,64 @@ export class Bestiary {
    * Zwraca obrażenia zadane graczowi w tej klatce — pętla gry robi z tego
    * czerwony błysk i sprawdza śmierć.
    */
-  step(player: Being, dtMs: number, rig: LightRig, rng: () => number, out: AttackResult): number {
-    let dmgToPlayer = 0;
+  step(
+    player: Being,
+    dtMs: number,
+    rig: LightRig,
+    rng: () => number,
+    out: AttackResult,
+    report: MobReport,
+  ): void {
+    report.damage = 0;
+    report.swung = false;
+    report.blocked = false;
+    report.dodged = false;
+    report.missed = false;
+
     for (const m of this.mobs) {
       const b = m.being;
-      if (b.actor.stance === Stance.Dead) continue;
+      if (m.flashMs > 0) m.flashMs -= dtMs;
+      if (b.actor.stance === Stance.Dead) {
+        animate(b, m.intent, dtMs);
+        continue;
+      }
 
       b.lum = this.lumAt(rig, b.x, b.y, b.z);
       updateAi(b, player, this.world, dtMs, rng, m.intent, CELL_METERS);
       this.moveBeing(b, m.intent, dtMs);
       if (serviceSwing(b, player, dtMs, rng, out, CELL_METERS)) {
-        dmgToPlayer += out.damage;
+        report.swung = true;
+        report.damage += out.damage;
+        if (out.blocked) {
+          report.blocked = true;
+          // Rozbłysk na sylwetce napastnika, gdy MÓJ blok zatrzymał jego cios.
+          // Bez tego udany blok wygląda tak samo jak cudze pudło, a to są dwie
+          // różne lekcje dla gracza.
+          m.flashMs = FEEDBACK.blockFlashMs;
+        } else if (out.dodged) {
+          report.dodged = true;
+        } else if (!out.landed) {
+          report.missed = true;
+        }
       }
       animate(b, m.intent, dtMs);
     }
-    return dmgToPlayer;
+  }
+
+  /**
+   * Cios zatrzymany przez przeciwnika: sam rozbłysk, bez klatki `Hit`. Kontakt był,
+   * więc coś musi błysnąć — ale bez tej różnicy "zablokował" i "spudłowałeś"
+   * dają ten sam obraz i różnią się wyłącznie tekstem w dzienniku.
+   */
+  markBlocked(m: Mob): void {
+    m.flashMs = FEEDBACK.blockFlashMs;
+  }
+
+  /** Zaznacza trafienie bytu: klatka `Hit` na chwilę plus rozbłysk. */
+  markHit(m: Mob): void {
+    m.flashMs = FEEDBACK.hitFlashMs;
+    m.being.holdMs = FEEDBACK.hitHoldMs;
+    m.being.frame = Frame.Hit;
   }
 
   /** Jasność, jaką renderer namaluje w tym miejscu — razem z pochodnią gracza. */
@@ -174,15 +237,33 @@ export class Bestiary {
       const b = m.being;
       const f = frames[b.kind];
       if (f === undefined) continue;
-      this.sprites.push({
-        x: b.x,
-        y: b.y,
-        baseZ: b.z,
-        yaw: b.yaw,
-        frame: b.frame,
-        lum: b.lum,
-        frames: f,
-      });
+      if (m.flashMs > 0) {
+        // Błysk to podmiana barwy w stronę bieli, nie podbicie luminancji:
+        // luminancja powyżej jedynki jest przycinana i byt gubi barwę.
+        const k = FEEDBACK.hitFlashMix;
+        this.sprites.push({
+          x: b.x,
+          y: b.y,
+          baseZ: b.z,
+          yaw: b.yaw,
+          frame: b.frame,
+          lum: b.lum,
+          r: f.r + (255 - f.r) * k,
+          g: f.g + (255 - f.g) * k,
+          b: f.b + (255 - f.b) * k,
+          frames: f,
+        });
+      } else {
+        this.sprites.push({
+          x: b.x,
+          y: b.y,
+          baseZ: b.z,
+          yaw: b.yaw,
+          frame: b.frame,
+          lum: b.lum,
+          frames: f,
+        });
+      }
     }
     return this.sprites;
   }
@@ -243,6 +324,13 @@ export function animate(b: Being, intent: Intent, dtMs: number): void {
   const st = b.actor.stance;
   if (st === Stance.Dead) {
     b.frame = Frame.Death;
+    b.holdMs = 0;
+    return;
+  }
+  // Klatka wymuszona zdarzeniem trzyma się przez zadany czas i wygrywa z ruchem:
+  // trafienie ma być widoczne nawet wtedy, gdy byt zaraz potem biegnie dalej.
+  if (b.holdMs > 0) {
+    b.holdMs -= dtMs;
     return;
   }
   if (st === Stance.Windup) {

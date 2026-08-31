@@ -11,7 +11,7 @@ import {
   DEFAULT_TARGET_COLS,
 } from '@rpg/core';
 import type { Camera } from '@rpg/core';
-import { Armor, PLAYER, MOVE, Weapon, wildPack } from '@rpg/content';
+import { Armor, FEEDBACK, PLAYER, MOVE, Weapon, wildPack } from '@rpg/content';
 import {
   CELL_METERS,
   ChunkStore,
@@ -41,10 +41,24 @@ import {
   serviceSwing,
   stepCombat,
   syncWeight,
+  weaponOf,
   ItemKind,
 } from '@rpg/rules';
-import { bar, drawCharacter, drawDeath, drawInventory, UI } from '@rpg/ui';
+import {
+  bar,
+  drawCharacter,
+  drawDeath,
+  drawInventory,
+  drawLog,
+  dimScreen,
+  makeEventLog,
+  pushEvent,
+  tickLog,
+  EventKind,
+  UI,
+} from '@rpg/ui';
 import { Bestiary, aiLabel, animate } from './entities.js';
+import type { MobReport } from './entities.js';
 
 /**
  * Punkt wejścia: pętla, wejście, sklejenie całości. Cała geometria siedzi
@@ -197,11 +211,11 @@ const bestiary = new Bestiary(SEED, world);
 const attack = makeAttackResult();
 /** Losowość walki. Osobny strumień od świata, żeby ruch gracza nie zmieniał terenu. */
 const combatRng = mulberry32(SEED ^ 0x00c0ffee);
-/** ms: ile jeszcze trwa czerwony błysk po otrzymaniu ciosu */
+const mobReport: MobReport = { damage: 0, swung: false, blocked: false, dodged: false, missed: false };
+/** ms: ile jeszcze trwa reakcja kadru na oberwanie (przyciemnienie + drganie) */
 let hurtMs = 0;
-/** ostatni komunikat walki — dziennik na jedną linijkę */
-let logLine = '';
-let logMs = 0;
+/** dziennik zdarzeń walki — dwie–trzy linijki gasnące po sekundzie */
+const events = makeEventLog();
 
 /** Który panel jest otwarty. Panel przejmuje klawiaturę i zwalnia pointer lock. */
 const Panel = { None: 0, Inventory: 1, Character: 2, Dead: 3 } as const;
@@ -211,10 +225,23 @@ let deathCause = '';
 /** czy w przeglądarce leży zapis — ekran śmierci pokazuje z tego inną podpowiedź */
 let hasSave = loadFromStorage(localStorage) !== null;
 
-function note(text: string): void {
-  logLine = text;
-  logMs = 3500;
+function note(text: string, kind: EventKind = EventKind.Neutral): void {
+  pushEvent(events, text, kind);
 }
+
+/**
+ * Reakcja kadru na oberwanie: przyciemnienie i drganie, oba krótkie. Drganie
+ * **nie rusza `cam.yaw`** — jest doliczane wyłącznie na czas rysowania, bo inaczej
+ * trafienie przesuwałoby celownik i psuło następny cios gracza. To ta sama zasada,
+ * przez którą odrzuciliśmy wygładzanie myszy w M2c: nic, co rusza celowaniem.
+ */
+function shakeAt(t: number): number {
+  if (hurtMs <= 0) return 0;
+  const faza = hurtMs / FEEDBACK.shakeMs;
+  return Math.sin(t * 0.001 * FEEDBACK.shakeHz * Math.PI * 2) * FEEDBACK.shakeAmp * faza;
+}
+
+
 
 function openPanel(which: number): void {
   panel = which;
@@ -345,15 +372,26 @@ function loadGame(): void {
 function playerCombat(dtMs: number): void {
   const target = bestiary.nearest(cam.x, cam.y);
   if (target === null) {
+    // `stepCombat` musi biec co klatkę także wtedy, gdy nie ma w co trafić —
+    // inaczej zamach w powietrze nigdy się nie kończy
     stepCombat(player.actor, dtMs);
     return;
   }
-  if (serviceSwing(player, target.being, dtMs, combatRng, attack, CELL_METERS)) {
-    if (attack.killed) note(`zabiłeś goblina (${attack.damage.toFixed(0)} obr.)`);
-    else if (attack.blocked) note('goblin zablokował');
-    else if (attack.dodged) note('goblin uskoczył');
-    else if (attack.landed) note(`trafiłeś za ${attack.damage.toFixed(0)}`);
-    else note('pudło');
+  if (!serviceSwing(player, target.being, dtMs, combatRng, attack, CELL_METERS)) return;
+
+  if (attack.killed) {
+    bestiary.markHit(target);
+    note('goblin pada', EventKind.Good);
+  } else if (attack.blocked) {
+    bestiary.markBlocked(target);
+    note('goblin zablokował', EventKind.Neutral);
+  } else if (attack.dodged) {
+    note('goblin uskoczył', EventKind.Neutral);
+  } else if (attack.landed) {
+    bestiary.markHit(target);
+    note(attack.staggered ? 'trafiony, zachwiał się' : 'trafiony', EventKind.Good);
+  } else {
+    note('pudło', EventKind.Neutral);
   }
 }
 
@@ -475,7 +513,9 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     importSave();
   }
-  if (e.code === 'Space') beginDodge(player.actor);
+  if (e.code === 'Space' && !beginDodge(player.actor) && player.actor.stance === Stance.Idle) {
+    note('brak wytrzymałości na unik', EventKind.Bad);
+  }
 });
 
 /** Klawisze paneli. Osobna funkcja, bo panel to inny tryb gry, a nie inny widok. */
@@ -521,7 +561,14 @@ canvas.addEventListener('click', () => {
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('mousedown', (e) => {
   if (panel !== Panel.None || document.pointerLockElement !== canvas) return;
-  if (e.button === 0) beginAttack(player.actor);
+  // Odmowa akcji musi być widoczna w tej samej klatce, w której padła. Kliknięcie,
+  // po którym nie dzieje się nic, gracz czyta jako zgubione wejście, a nie jako
+  // karę za własną decyzję — i przestaje ufać sterowaniu.
+  if (e.button === 0 && !beginAttack(player.actor)) {
+    if (player.actor.stamina < weaponOf(player.actor).stamina) {
+      note('brak wytrzymałości', EventKind.Bad);
+    }
+  }
   if (e.button === 2) beginBlock(player.actor);
 });
 canvas.addEventListener('mouseup', (e) => {
@@ -687,21 +734,45 @@ function frame(t: number): void {
     bestiary.spawnAround(cam.x, cam.y, player.z);
     playerCombat(dtMs);
     animate(player, { vx: 0, vy: 0, running: player.running }, dtMs);
-    const obrazenia = bestiary.step(player, dtMs, render.light, combatRng, attack);
-    if (obrazenia > 0) {
-      hurtMs = 220;
-      note(`oberwałeś za ${obrazenia.toFixed(0)}`);
+    bestiary.step(player, dtMs, render.light, combatRng, attack, mobReport);
+    if (mobReport.damage > 0) {
+      hurtMs = FEEDBACK.hurtDimMs;
+      note('oberwałeś', EventKind.Bad);
+    } else if (mobReport.blocked) {
+      note('zablokowane', EventKind.Good);
+    } else if (mobReport.dodged) {
+      note('uskoczyłeś', EventKind.Good);
+    } else if (mobReport.missed) {
+      note('minął cię', EventKind.Neutral);
     }
     if (player.actor.hp <= 0 && player.actor.stance === Stance.Dead) {
       deathCause = 'zabity przez goblina';
       openPanel(Panel.Dead);
     }
   }
-  if (hurtMs > 0) hurtMs -= dtMs;
-  if (logMs > 0) logMs -= dtMs;
+  tickLog(events, dtMs);
 
+  // Drganie doliczamy wyłącznie na czas rysowania i zaraz cofamy — `cam` zostaje
+  // źródłem prawdy o tym, gdzie gracz celuje.
+  const drgania = shakeAt(t);
+  const yaw0 = cam.yaw;
+  const pitch0 = cam.pitch;
+  cam.yaw += drgania;
+  cam.pitch += drgania * 0.5;
   renderWorld(world, cam, screen, render);
   drawSprites(screen, cam, render, bestiary.spriteList(), bestiary.mobs.length);
+  cam.yaw = yaw0;
+  cam.pitch = pitch0;
+
+  if (hurtMs > 0) {
+    // im bliżej końca efektu, tym jaśniej — przyciemnienie ma zakłuć, nie oślepić
+    const faza = hurtMs / FEEDBACK.hurtDimMs;
+    // po świecie i sprite'ach, a przed HUD-em: przyciemnienie dotyczy obrazu,
+    // a nie wskaźników, które w tym momencie są najbardziej potrzebne
+    dimScreen(screen, 1 - (1 - FEEDBACK.hurtDim) * faza);
+    hurtMs -= dtMs;
+  }
+
   drawHud();
   if (panel === Panel.Inventory) drawInventory(screen, player.actor, pack, cursor);
   else if (panel === Panel.Character) drawCharacter(screen, player.actor);
@@ -768,8 +839,16 @@ function drawVitals(): void {
   bar(screen, 5, y, 22, a.hp, a.maxHp, hurtMs > 0 ? UI.text : UI.bad);
   screen.text(28, y, `${Math.ceil(a.hp)}/${a.maxHp}`, HUD_COLOR);
 
-  screen.text(1, y + 1, 'WYT', UI.dim);
-  bar(screen, 5, y + 1, 22, a.stamina, a.maxStamina, UI.good);
+  screen.text(1, y + 1, 'WYT', a.exhausted ? UI.bad : UI.dim);
+  bar(screen, 5, y + 1, 22, a.stamina, a.maxStamina, a.exhausted ? UI.bad : UI.good);
+
+  if (a.exhausted) {
+    // Stan trwa aż do progu wyjścia i jest widoczny poza samym paskiem — moment
+    // wyczerpania jest najważniejszą chwilą walki i nie może wymagać wpatrywania
+    // się w słupek.
+    screen.text(1, y, 'ZDR', UI.dim);
+    screen.text(28, y + 1, 'WYCZERPANY', UI.bad);
+  }
 
   const stan =
     a.stance === Stance.Windup
@@ -797,7 +876,10 @@ function drawVitals(): void {
       );
     }
   }
-  if (logMs > 0) screen.text(1, y + 3, logLine, UI.accent);
+  // Dziennik rośnie w GÓRĘ od wiersza nad wskaźnikami: w dół nie ma miejsca,
+  // bo tam stoi linia pomocy, a nachodzenie dwóch tekstów na siebie czyta się
+  // jak błąd renderu.
+  drawLog(screen, 1, y - 2, events);
 }
 
 resize();
