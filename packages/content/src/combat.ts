@@ -56,13 +56,18 @@ export const COMBAT = {
    * się do 45 s w p99, bo obie strony stały wyczerpane.
    */
   staminaRegenDelayMs: 1000,
-  /** poniżej tylu punktów byt jest widocznie wyczerpany */
-  exhaustedBelow: 20,
+  /**
+   * Ułamek puli, poniżej którego byt jest widocznie wyczerpany. Ułamek, a nie
+   * liczba punktów: goblin ma pulę 60, gracz 100, więc próg 20 punktów znaczyłby
+   * dla goblina jedną trzecią zapasu, a dla gracza jedną piątą — i potwór
+   * przez większość walki cofałby się zamiast bić.
+   */
+  exhaustedBelow: 0.2,
   /**
    * ...i dopiero powyżej tylu z tego wychodzi. Histereza, bo próg pojedynczy daje
    * migotanie stanu przy każdym tyknięciu regeneracji.
    */
-  exhaustedClear: 34,
+  exhaustedClear: 0.34,
   /** ...i gdy trzyma blok: mniej, więc blok w nieskończoność nie działa */
   staminaRegenBlocking: 7,
   /** poniżej tylu punktów cios wytrąca z równowagi */

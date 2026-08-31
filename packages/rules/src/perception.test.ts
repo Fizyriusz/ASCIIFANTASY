@@ -44,7 +44,7 @@ function player(x: number, y: number, yaw = 0, lum = 1): Being {
 
 function goblin(x: number, y: number, yaw = 0): Being {
   const def = wildCreatures[0]!;
-  const a = makeActor(def.hp, 60, def.attrs, def.skills);
+  const a = makeActor(def.hp, def.stamina, def.attrs, def.skills);
   a.weapon = def.weapon;
   return makeBeing(a, x, y, 0, yaw, 0, def.walkMps, def.runMps);
 }

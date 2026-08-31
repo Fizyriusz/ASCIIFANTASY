@@ -93,17 +93,17 @@ describe('wytrzymałość jako zasób', () => {
 
   it('wyczerpanie ma histerezę, więc stan nie migocze', () => {
     const a = player();
-    a.stamina = COMBAT.exhaustedBelow - 1;
+    a.stamina = a.maxStamina * COMBAT.exhaustedBelow - 1;
     tickActor(a, 0);
     expect(a.exhausted).toBe(true);
 
     // tuż powyżej dolnego progu nadal wyczerpany — inaczej jedno tyknięcie
     // regeneracji zdejmowałoby stan i zaraz go przywracało
-    a.stamina = COMBAT.exhaustedBelow + 1;
+    a.stamina = a.maxStamina * COMBAT.exhaustedBelow + 1;
     tickActor(a, 0);
     expect(a.exhausted).toBe(true);
 
-    a.stamina = COMBAT.exhaustedClear + 1;
+    a.stamina = a.maxStamina * COMBAT.exhaustedClear + 1;
     tickActor(a, 0);
     expect(a.exhausted).toBe(false);
   });

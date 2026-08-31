@@ -37,6 +37,12 @@ export interface CreatureDef {
   widthM: number;
   /** punkty życia na start; reszta reguł jest w `packages/rules` */
   hp: number;
+  /**
+   * Pula wytrzymałości. Osobno od hp i **nie w kodzie gry**: przy puli 60 i maczudze
+   * po 19 goblin ma trzy ciosy do wyczerpania, czyli przez większość walki cofa się
+   * zamiast bić. To jest liczba balansu i musi być strojona razem z kosztem broni.
+   */
+  stamina: number;
   /** metry na sekundę: marsz i pościg */
   walkMps: number;
   runMps: number;
@@ -107,6 +113,7 @@ const goblin: CreatureDef = {
   heightM: 1.4,
   widthM: 0.9,
   hp: 14,
+  stamina: 85,
   walkMps: 1.5,
   runMps: 3.8,
   weapon: 2,

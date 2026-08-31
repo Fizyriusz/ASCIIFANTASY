@@ -161,8 +161,8 @@ export function tickActor(a: Actor, dtMs: number): void {
 
   // histereza wyczerpania: dwa progi zamiast jednego, żeby stan nie migotał
   if (a.exhausted) {
-    if (a.stamina > COMBAT.exhaustedClear) a.exhausted = false;
-  } else if (a.stamina < COMBAT.exhaustedBelow) {
+    if (a.stamina > a.maxStamina * COMBAT.exhaustedClear) a.exhausted = false;
+  } else if (a.stamina < a.maxStamina * COMBAT.exhaustedBelow) {
     a.exhausted = true;
   }
 }

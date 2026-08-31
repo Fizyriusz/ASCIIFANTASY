@@ -165,8 +165,20 @@ export function updateAi(
       // sygnałem „jest zmęczony, teraz jest twoja chwila".
       if (a.exhausted) {
         endBlock(a);
-        moveTowards(self, self.x - dx, self.y - dy, self.walkMps, out, metersPerCell);
+        // Cofa się **na dystans jednego kroku**, a nie w nieskończoność: byt
+        // uciekający póki nie odsapnie zamienia walkę w pogoń, w której szybszy
+        // jest ten, kto właśnie nie może bić. Po odsunięciu stoi i łapie oddech,
+        // a gracz ma czytelne zaproszenie, żeby podejść i to wykorzystać.
+        if (distM < reach * 1.4) {
+          moveTowards(self, self.x - dx, self.y - dy, self.walkMps, out, metersPerCell);
+        }
         break;
+      }
+      // Byt w walce **domyka dystans**, jeśli odpłynął. Bez tego wystarczy, żeby raz
+      // się cofnął (na przykład przy wyczerpaniu), a zostaje 2,6 m od gracza: poza
+      // własnym zasięgiem, ale wciąż w stanie walki — i starcie nie kończy się nigdy.
+      if (distM > reach * 0.9) {
+        moveTowards(self, player.x, player.y, self.walkMps, out, metersPerCell);
       }
       if (a.stance === Stance.Idle) {
         // trzy czwarte ciosów, reszta to blok — przeciwnik, który tylko bije,
