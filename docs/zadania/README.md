@@ -14,8 +14,8 @@ nie ma zielonych testów i grywalnego buildu.
 | M2c | [Górny front: bryła wisząca to nie sufit](M2c-gorny-front.md) — **przed M3** | zrobione | sprite’y, które nie znikają |
 | M3 | [Postacie, walka, ekwipunek, zapis](M3-postacie-walka-zapis.md) | zrobione, czeka na odbiór | rozgrywkę |
 | M3b | [Czytelność walki](M3b-czytelnosc-walki.md) | zrobione, czeka na odbiór | walkę, którą da się czytać |
-| M3c | [Bryła stworzeń](M3c-bryla-stworzen.md) | do zrobienia, **po M3d** | czworonogi i pająki |
-| M3d | [Zawartość lochu: mieszkańcy i światło](M3d-zawartosc-lochu.md) | do zrobienia, **najpierw** | loch, który jest miejscem |
+| M3c | [Bryła stworzeń](M3c-bryla-stworzen.md) | do zrobienia — **następne** | czworonogi i pająki |
+| M3d | [Zawartość lochu: mieszkańcy i światło](M3d-zawartosc-lochu.md) | zrobione, czeka na odbiór | loch, który jest miejscem |
 | M4 | Miasteczko ([szkic](M4-M6-szkic.md)) | — | świat, który żyje |
 | M5 | Questy ([szkic](M4-M6-szkic.md)) | — | cel gry |
 | M6 | Region ([szkic](M4-M6-szkic.md)) | — | skalę |

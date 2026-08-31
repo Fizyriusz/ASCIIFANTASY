@@ -111,8 +111,8 @@ interface SaveFile {
 
 Zapis po 200 h gry powinien mieć < 2 MB. Jeśli rośnie szybciej — coś zapisujemy niepotrzebnie.
 
-**Stan po M3** (`packages/world/src/save.ts`). Działa: seed, zegar, pełny stan gracza
-z plecakiem, delty komórek, byty i flagi. Nie ma jeszcze frakcji ani questów — wejdą
+**Stan po M3d** (`packages/world/src/save.ts`, `SAVE_VERSION = 2`). Działa: seed, zegar,
+pełny stan gracza z plecakiem, delty komórek, byty **z pochodzeniem** i flagi. Nie ma jeszcze frakcji ani questów — wejdą
 z M4 i M5, jako kolejne pola i podbicie `SAVE_VERSION`.
 
 Format na dysku jest **krotkowy**: span leży jako `[bottom, top, mat, capMat, flags]`,
@@ -306,6 +306,32 @@ i ta sama liczba jest czytana dla licowania ściany z sąsiedniej komórki.
 
 Konsekwencje rozgrywkowe za darmo: loch bez światła jest naprawdę nieczytelny, skradanie
 = `światło + hałas`, zaklęcie światła jest realnym przedmiotem użytkowym, noc ma znaczenie.
+
+### 3.3a Zawartość lochu: mieszkańcy i żagwie (M3d)
+
+Loch jest funkcją `(seed, poiId)`, więc jego **zawartość** też nią jest:
+`dungeonDwellers(seed, graph)` i `dungeonLights(seed, graph)` liczą się z
+`(seed, poiId, indeks komory)`. Nie z siatki powierzchni i nie z danych chunka —
+pozycje zapisane w chunku zmieniłyby jego hash zawartości, czyli test determinizmu
+i format zapisu.
+
+**Świat proponuje, gra dysponuje.** Generator zwraca miejsca, a sprawdzenie, czy
+sylwetka się w nich mieści (`surfaceHeight`, `blocks`), robi warstwa gry — bo to ona
+zna kolizję. Ta sama zasada, co przy `Intent` w AI.
+
+**Dlaczego to nie mogło być rozszerzeniem reguły powierzchniowej.** Klaster
+rozmnażania na powierzchni ma bok 16 komórek, zamieszkany jest co ósmy, a pozycja
+losuje się z całego klastra. Komora lochu to 3×6 do 8×4 komórek, czyli 7–12% jednego
+klastra — pomiar na najbliższym lochu od startu dał **zero mieszkańców w trzech
+pierwszych komorach**, mimo że wszystkie ich komórki nadawały się do postawienia bytu
+(18/18, 32/32, 28/28). Do tego klastry wokół wejścia zużywają się **na powierzchni**,
+zanim gracz zejdzie: 6 z 49 zamieszkanych, wszystkie oznaczone jako rozpatrzone.
+Trzy niezależne przyczyny, jeden skutek — pusty loch.
+
+**Ciemność zostaje stanem domyślnym.** Żagwie ma 30% komór, mediana trzy na loch,
+a test ciemności z M2 obowiązuje bez zmiany progów. `LightRig` ma twardy limit ośmiu
+źródeł i `addSource` po cichu zwraca `false`, więc gra karmi zestaw **najbliższymi**
+żagwiami, nie wszystkimi.
 
 ### 3.4 Sprite'y
 
@@ -700,7 +726,7 @@ Ruch potworów korzysta dziś z tej samej prymitywnej kolizji co gracz i ma ten 
 problem: goblin nie wejdzie po schodach stromszych niż 0,55 m na komórkę. Termin
 przesunięty na M4, gdzie i tak wracamy do wejść i kompozycji lochu (§10.3).
 
-### 10.6 Klaster rozmnażania jest odtwarzany z pozycji bytu — do rewizji w M4
+### 10.6 Klaster rozmnażania odtwarzany z pozycji bytu — **spłacone w M3d**
 
 Gobliny wychodzą z klastrów 16×16 komórek, a to, które klastry już wydały swoje byty,
 jest zapamiętane w zbiorze w pamięci (`Bestiary.seen`). W zapisie tego zbioru nie ma:
@@ -710,11 +736,13 @@ klastry i tam zginął, zostawia swój klaster nieoznaczony — i po wczytaniu t
 rodzi nowy komplet.
 
 Świadomie nie zapisujemy zbioru klastrów: rósłby bez ograniczeń wraz ze zwiedzonym
-terenem, a zapis ma być seedem plus deltami, nie dziennikiem odwiedzin. Właściwym
-rozwiązaniem jest identyfikator klastra **w bycie** (czyli byt pamiętający, skąd
-wyszedł — pole `Mob.origin` już istnieje, brakuje go w formacie zapisu) i podbicie
-`SAVE_VERSION`. Robimy to w M4 razem z frakcjami, bo wtedy i tak dochodzi
-przynależność bytu do grupy.
+terenem, a zapis ma być seedem plus deltami, nie dziennikiem odwiedzin.
+
+**Spłacone w M3d**: byt niesie `origin` (`"kx:ky"` dla klastra powierzchni,
+`"poi:komora"` dla lochu) i to pochodzenie idzie do zapisu, `SAVE_VERSION = 2`.
+Termin przyszedł wcześniej niż zakładany M4, bo mieszkaniec lochu psuł to mocniej
+niż byt na łące: wystarczyło, żeby wyszedł za graczem do korytarza, a po wczytaniu
+jego komora rodziła drugi komplet.
 
 ### 10.3 Wejście do jaskini jest kompozycją, nie emergentne — do rewizji w M4
 
