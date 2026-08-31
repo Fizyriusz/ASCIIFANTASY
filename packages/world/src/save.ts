@@ -17,7 +17,7 @@ import { MAX_SPANS_PER_CELL } from './grid.js';
 import type { Cell, DeltaKey, SaveFile, Span } from './types.js';
 
 /** Podbijamy przy każdej niezgodnej zmianie formatu. Stare zapisy odrzucamy wprost. */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 /** Span w postaci krotki — tak leży w pliku zapisu. */
 type SpanTuple = [number, number, number, number, number];
@@ -59,6 +59,16 @@ export interface EntitySave {
   yaw: number;
   hp: number;
   ai: number;
+  /**
+   * Skąd byt pochodzi: `"kx:ky"` dla klastra powierzchni, `"poi:komora"` dla lochu.
+   *
+   * Do wersji 1 zapisu pochodzenie odtwarzało się z **pozycji**, co działało tylko
+   * dopóki byt stał tam, gdzie się urodził. Mieszkaniec lochu, który wyszedł za
+   * graczem do korytarza, po wczytaniu odradzał swoją komorę — bo z jego pozycji
+   * nie dało się już odczytać, że ta komora jest już obsadzona. To jest dług 10.6
+   * z architektury i tu zostaje spłacony.
+   */
+  origin: string;
 }
 
 export interface GameSave extends SaveFile {
@@ -151,6 +161,14 @@ export function parse(text: string): GameSave | null {
     }
   }
 
+  // byty bez pochodzenia (zapis v1) już się nie zdarzą — wersja jest odrzucana
+  // wcześniej — ale pole jest opcjonalne w danych, więc uzupełniamy je pustym
+  const entities: EntitySave[] = [];
+  for (const e of w.e) {
+    if (typeof e !== 'object' || e === null) continue;
+    entities.push({ ...(e as EntitySave), origin: (e as EntitySave).origin ?? '' });
+  }
+
   return {
     version: SAVE_VERSION,
     seed: w.seed,
@@ -158,7 +176,7 @@ export function parse(text: string): GameSave | null {
     cellDeltas,
     flags,
     player: w.p,
-    entities: w.e,
+    entities,
   };
 }
 

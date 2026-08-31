@@ -34,7 +34,15 @@ export {
   bedrockUnder,
   clearDungeonCache,
 } from './dungeon.js';
-export type { DungeonGraph, DungeonRoom, DungeonCorridor, DungeonVoid } from './dungeon.js';
+export type {
+  DungeonGraph,
+  DungeonRoom,
+  DungeonCorridor,
+  DungeonVoid,
+  DungeonDweller,
+  DungeonLight,
+} from './dungeon.js';
+export { dungeonDwellers, dungeonLights } from './dungeon.js';
 export { structureAt, structuresNear, structureAtCell, StructurePart } from './structure.js';
 export type { Structure, StructureHit } from './structure.js';
 export { ChunkStore } from './streaming.js';

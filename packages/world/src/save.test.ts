@@ -4,14 +4,22 @@ import { CHUNK_SIZE, SpanFlags } from './types.js';
 import type { Cell, DeltaKey } from './types.js';
 import { ChunkStore } from './streaming.js';
 import { mulberry32 } from './rng.js';
-import { parse, saveSizeBytes, serialize, loadFromStorage, saveToStorage, clearStorage } from './save.js';
+import {
+  parse,
+  saveSizeBytes,
+  serialize,
+  loadFromStorage,
+  saveToStorage,
+  clearStorage,
+  SAVE_VERSION,
+} from './save.js';
 import type { GameSave, StorageLike } from './save.js';
 
 const SEED = 4242;
 
 function emptySave(): GameSave {
   return {
-    version: 1,
+    version: SAVE_VERSION,
     seed: SEED,
     clock: 0,
     cellDeltas: {},
@@ -80,6 +88,7 @@ function playFor(hours: number, perHour = 60): GameSave {
       yaw: rnd() * 6.28,
       hp: Math.round(rnd() * 14),
       ai: Math.floor(rnd() * 5),
+      origin: i % 2 === 0 ? `3:${i}` : `516557154:${i % 7}`,
     });
   }
   return save;
@@ -123,6 +132,8 @@ describe('format zapisu', () => {
     expect(parse('{')).toBeNull();
     expect(parse('null')).toBeNull();
     expect(parse('{"v":999}')).toBeNull();
+    // zapis w starym formacie jest odrzucany wprost, a nie wczytywany po cichu
+    expect(parse(JSON.stringify({ v: 1, seed: 1, clock: 0, d: [], f: [], e: [], p: {} }))).toBeNull();
     expect(parse(JSON.stringify({ v: 1, seed: 1, clock: 0 }))).toBeNull();
   });
 
