@@ -125,7 +125,7 @@ export class Bestiary {
   private makeGoblin(x: number, y: number, z: number, yaw: number, origin: string): Mob {
     const def = wildCreatures[0];
     if (def === undefined) throw new Error('paczka bez potworów');
-    const actor = makeActor(def.hp, 60, def.attrs, def.skills);
+    const actor = makeActor(def.hp, def.stamina, def.attrs, def.skills);
     equipWeapon(actor, def.weapon);
     const being = makeBeing(actor, x, y, z, yaw, 0, def.walkMps, def.runMps);
     return { being, intent: makeIntent(), origin, flashMs: 0 };
