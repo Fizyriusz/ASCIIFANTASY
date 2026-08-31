@@ -212,6 +212,8 @@ const attack = makeAttackResult();
 /** Losowość walki. Osobny strumień od świata, żeby ruch gracza nie zmieniał terenu. */
 const combatRng = mulberry32(SEED ^ 0x00c0ffee);
 const mobReport: MobReport = { damage: 0, swung: false, blocked: false, dodged: false, missed: false };
+/** ile żagwi świeci w tej klatce — do HUD-u, bo limit zestawu jest cichy */
+let zrodel = 0;
 /** ms: ile jeszcze trwa reakcja kadru na oberwanie (przyciemnienie + drganie) */
 let hurtMs = 0;
 /** dziennik zdarzeń walki — dwie–trzy linijki gasnące po sekundzie */
@@ -759,6 +761,9 @@ function frame(t: number): void {
   const pitch0 = cam.pitch;
   cam.yaw += drgania;
   cam.pitch += drgania * 0.5;
+  // Żagwie lochu: najbliższe źródła trafiają do zestawu przed renderem. Zestaw ma
+  // twardy limit ośmiu, więc wybór jest po odległości, a nie po kolejności w liście.
+  zrodel = bestiary.feedLights(render.light, cam.x, cam.y);
   renderWorld(world, cam, screen, render);
   drawSprites(screen, cam, render, bestiary.spriteList(), bestiary.mobs.length);
   cam.yaw = yaw0;
@@ -805,7 +810,7 @@ function drawHud(): void {
   screen.text(
     1,
     2,
-    `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}  pochodnia ${torchOn ? 'tak' : 'nie'}`,
+    `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}  pochodnia ${torchOn ? 'tak' : 'nie'}  żagwie ${zrodel}  byty ${bestiary.mobs.length}`,
     HUD_DIM,
   );
   // Pomiar rozkładu ruchu myszy: kubełki, maksimum i licznik odrzuceń. Zostaje

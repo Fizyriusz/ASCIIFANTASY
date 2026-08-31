@@ -12,11 +12,11 @@
  * musi znać jedno i drugie — i to jest właśnie warstwa gry.
  */
 
-import { compileSprite, lightAt } from '@rpg/core';
+import { addSource, clearSources, compileSprite, lightAt } from '@rpg/core';
 import type { LightRig, SpriteFrames, SpriteInstance } from '@rpg/core';
-import { FEEDBACK, Frame, WILD_SPAWN, wildCreatures } from '@rpg/content';
-import { CELL_METERS, h32 } from '@rpg/world';
-import type { ChunkStore } from '@rpg/world';
+import { FEEDBACK, Frame, WILD_SPAWN, wildCreatures, wildPack } from '@rpg/content';
+import { CELL_METERS, dungeonDwellers, dungeonLights, dungeonsNear, h32 } from '@rpg/world';
+import type { ChunkStore, DungeonGraph, DungeonLight } from '@rpg/world';
 import {
   AiState,
   Stance,
@@ -28,6 +28,7 @@ import {
   updateAi,
 } from '@rpg/rules';
 import type { AttackResult, Being, Intent } from '@rpg/rules';
+import type { EntitySave } from '@rpg/world';
 
 /** Bok klastra rozmnażania w komórkach. Mniejszy = gęściej i drożej. */
 const CLUSTER = 16;
@@ -71,9 +72,19 @@ const frames: SpriteFrames[] = wildCreatures.map((c) =>
 
 export class Bestiary {
   readonly mobs: Mob[] = [];
-  /** klastry już rozpatrzone — bez tego gobliny odradzają się co klatkę */
+  /**
+   * Miejsca już rozpatrzone: klaster powierzchni (`"kx:ky"`) albo komora lochu
+   * (`"poi:komora"`). Bez tego byty odradzają się co klatkę, a po wczytaniu zapisu
+   * — po raz drugi obok tych, które właśnie wróciły z pliku.
+   */
   private readonly seen = new Set<string>();
   private readonly sprites: SpriteInstance[] = [];
+  /** żagwie lochu, w którym gracz się znajduje; puste na powierzchni */
+  private lights: readonly DungeonLight[] = [];
+  /** znaczniki „już wzięte" przy wyborze najbliższych źródeł — bufor, nie alokacja */
+  private usedLights = new Uint8Array(64);
+  /** loch, którego zawartość jest już policzona — żeby nie liczyć jej co klatkę */
+  private lochId = -1;
 
   constructor(
     private readonly seed: number,
@@ -85,6 +96,17 @@ export class Bestiary {
    * cokolwiek tylko przy wejściu w nowy klaster — reszta to `Set.has`.
    */
   spawnAround(px: number, py: number, pz: number): void {
+    // Pod stropem klastry powierzchni nie obowiązują. Bez tego warunku zejście
+    // do lochu **zużywa** klastry łąki nad nim: byty stają na trawie, a gracz
+    // pod ziemią nie spotyka nikogo — i już nigdy nie spotka, bo klaster raz
+    // rozpatrzony nie wraca.
+    if (this.underground(px, py, pz)) {
+      this.populateDungeon(px, py, pz);
+      return;
+    }
+    this.lights = [];
+    this.lochId = -1;
+
     const cx = Math.floor(px / CLUSTER);
     const cy = Math.floor(py / CLUSTER);
     for (let dy = -CLUSTER_RING; dy <= CLUSTER_RING; dy++) {
@@ -120,6 +142,90 @@ export class Bestiary {
       if (this.world.blocks(Math.floor(x), Math.floor(y), z + 0.1, z + 1.6)) continue;
       this.mobs.push(this.makeGoblin(x, y, z, ((hp >>> 16) % 628) / 100, `${kx}:${ky}`));
     }
+  }
+
+  /** Czy nad graczem jest bryła — najtańszy sprawdzian „jestem pod ziemią". */
+  private underground(px: number, py: number, pz: number): boolean {
+    const nad = this.world.surfaceHeight(Math.floor(px), Math.floor(py), 1e6);
+    return Number.isFinite(nad) && nad > pz + 3;
+  }
+
+  /**
+   * Zawartość lochu, w którym stoi gracz: mieszkańcy komór i żagwie. Liczona raz
+   * na loch, nie co klatkę — `lochId` pilnuje, żeby wejście do tej samej komory
+   * po raz drugi nic nie kosztowało.
+   *
+   * Świat proponuje pozycje, tutaj sprawdzamy, czy sylwetka się w nich mieści:
+   * reguły geometrii są po tej stronie, bo to warstwa gry zna kolizję.
+   */
+  private populateDungeon(px: number, py: number, pz: number): void {
+    const graf = this.dungeonAt(px, py, pz);
+    if (graf === null) return;
+    if (graf.poiId !== this.lochId) {
+      this.lochId = graf.poiId;
+      this.lights = dungeonLights(this.seed, graf);
+      if (this.lights.length > this.usedLights.length) {
+        this.usedLights = new Uint8Array(this.lights.length);
+      }
+    }
+    for (const d of dungeonDwellers(this.seed, graf)) {
+      if (this.mobs.length >= MAX_BEINGS) return;
+      const key = `${graf.poiId}:${d.roomIndex}:${d.x}:${d.y}`;
+      if (this.seen.has(key)) continue;
+      this.seen.add(key);
+      const z = this.world.surfaceHeight(Math.floor(d.x), Math.floor(d.y), d.z + 2);
+      if (!Number.isFinite(z)) continue;
+      if (this.world.blocks(Math.floor(d.x), Math.floor(d.y), z + 0.1, z + 1.6)) continue;
+      this.mobs.push(this.makeGoblin(d.x, d.y, z, 0, `${graf.poiId}:${d.roomIndex}`));
+    }
+  }
+
+  /** Loch, którego obwiednia obejmuje gracza i którego podłogi sięgają jego poziomu. */
+  private dungeonAt(px: number, py: number, pz: number): DungeonGraph | null {
+    for (const g of dungeonsNear(this.seed, px - 512, py - 512, px + 512, py + 512)) {
+      if (px < g.minX || px > g.maxX || py < g.minY || py > g.maxY) continue;
+      if (pz < g.baseZ) continue;
+      return g;
+    }
+    return null;
+  }
+
+  /**
+   * Karmi zestaw świateł najbliższymi żagwiami. `LightRig` ma twardy limit
+   * (`max`, domyślnie osiem), a `addSource` po cichu zwraca `false` — loch
+   * z dziesięcioma żagwiami zgasłby w połowie bez żadnego komunikatu.
+   */
+  feedLights(rig: LightRig, px: number, py: number): number {
+    clearSources(rig);
+    const n = this.lights.length;
+    if (n === 0) return 0;
+    const xm = px * CELL_METERS;
+    const ym = py * CELL_METERS;
+    const p = wildPack.light;
+    let dodane = 0;
+    // wybór k najbliższych bez sortowania i bez alokacji: k przebiegów po liście,
+    // przy k = 8 i kilkunastu zagwiach to ponizej dwustu operacji na klatke
+    const uzyte = this.usedLights;
+    for (let i = 0; i < n; i++) uzyte[i] = 0;
+    while (dodane < rig.max) {
+      let best = -1;
+      let bestD = Infinity;
+      for (let i = 0; i < n; i++) {
+        if (uzyte[i] === 1) continue;
+        const l = this.lights[i]!;
+        const d = (l.x - xm) ** 2 + (l.y - ym) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+      if (best < 0) break;
+      uzyte[best] = 1;
+      const l = this.lights[best]!;
+      if (!addSource(rig, l.x, l.y, l.z, p.sourceRadius, p.sourcePower)) break;
+      dodane++;
+    }
+    return dodane;
   }
 
   private makeGoblin(x: number, y: number, z: number, yaw: number, origin: string): Mob {
@@ -269,11 +375,20 @@ export class Bestiary {
   }
 
   /** Byty do zapisu: tylko to, czego świat nie odtworzy z seeda. */
-  toSave(): { kind: number; x: number; y: number; z: number; yaw: number; hp: number; ai: number }[] {
-    const out = [];
+  toSave(): EntitySave[] {
+    const out: EntitySave[] = [];
     for (const m of this.mobs) {
       const b = m.being;
-      out.push({ kind: b.kind, x: b.x, y: b.y, z: b.z, yaw: b.yaw, hp: b.actor.hp, ai: b.ai });
+      out.push({
+        kind: b.kind,
+        x: b.x,
+        y: b.y,
+        z: b.z,
+        yaw: b.yaw,
+        hp: b.actor.hp,
+        ai: b.ai,
+        origin: m.origin,
+      });
     }
     return out;
   }
@@ -287,15 +402,18 @@ export class Bestiary {
    * klastra, zostawia go nieoznaczonym i wtedy klaster odradza się przy wczytaniu.
    * To jest znany dług, opisany w §10.6 architektury.
    */
-  restore(list: readonly { kind: number; x: number; y: number; z: number; yaw: number; hp: number; ai: number }[]): void {
+  restore(list: readonly EntitySave[]): void {
     this.mobs.length = 0;
+    this.lochId = -1;
     for (const e of list) {
-      const m = this.makeGoblin(e.x, e.y, e.z, e.yaw, 'zapis');
+      const m = this.makeGoblin(e.x, e.y, e.z, e.yaw, e.origin);
       m.being.actor.hp = e.hp;
       if (e.hp <= 0) m.being.actor.stance = Stance.Dead;
       m.being.ai = e.ai as AiState;
       this.mobs.push(m);
-      this.seen.add(`${Math.floor(e.x / CLUSTER)}:${Math.floor(e.y / CLUSTER)}`);
+      // Pochodzenie idzie z zapisu, a nie z pozycji: byt, który wyszedł ze swojej
+      // komory za graczem, inaczej odrodziłby ją po wczytaniu (dług 10.6).
+      if (e.origin !== '') this.seen.add(e.origin);
     }
   }
 
