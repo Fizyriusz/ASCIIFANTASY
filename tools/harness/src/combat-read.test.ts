@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { compileSprite, drawSprites, renderWorld } from '@rpg/core';
-import type { Screen, SpriteInstance } from '@rpg/core';
+import { compileSprite, drawSprites, lightAt, renderWorld } from '@rpg/core';
+import type { LightRig, Screen, SpriteInstance } from '@rpg/core';
 import { FEEDBACK, Frame, inkOf, weapons, wildCreatures } from '@rpg/content';
 import { EventKind, dimScreen, drawLog, makeEventLog, pushEvent, tickLog } from '@rpg/ui';
 import { assertSnapshot } from './snapshot.js';
@@ -147,7 +147,25 @@ describe('kontrast sprite do tła', () => {
    * komórką bez niego. Barwa jest liczona po kwantyzacji do 15 bitów, czyli w tej
    * samej przestrzeni, w której gracz to widzi.
    */
-  function kontrast(nazwa: 'łąka' | 'las' | 'loch', m: number): { med: number; p05: number } {
+  /**
+   * Jasność bytu liczona **tak jak w grze** (`Bestiary.lumAt`): ze światła komórki
+   * i z pochodni gracza. Wpisanie tu stałej znaczyłoby mierzenie przypadku, który
+   * nie występuje — w lochu nie ma światła statycznego, więc byt oddalony o 16 m
+   * jest po prostu niewidoczny.
+   */
+  function lumBytu(
+    store: { light: (x: number, y: number) => number },
+    rig: LightRig,
+    x: number,
+    y: number,
+    z: number,
+  ): number {
+    const raw = store.light(Math.floor(x), Math.floor(y));
+    const surface = raw >> 4 === 0 ? raw & 15 : raw >> 4;
+    return lightAt(rig, x * MPC, y * MPC, z + 1.2, surface, raw & 15);
+  }
+
+  function kontrast(nazwa: 'łąka' | 'las' | 'loch', m: number): { med: number; p05: number; komorek: number } {
     const dungeon = nazwa === 'loch' ? dungeonScene('room') : null;
     const wild = nazwa === 'łąka' ? wildScene('hills') : nazwa === 'las' ? wildScene('forest') : null;
     const store = dungeon !== null ? dungeon.store : wild!.store;
@@ -162,7 +180,8 @@ describe('kontrast sprite do tła', () => {
     renderWorld(store, cam, pusty, ctx);
     const zByt = referenceScreen();
     renderWorld(store, cam, zByt, ctx);
-    drawSprites(zByt, cam, ctx, [byt(x, y, z, cam.yaw + Math.PI, Frame.Idle, 0.8)], 1);
+    const lum = lumBytu(store, ctx.light, x, y, z);
+    drawSprites(zByt, cam, ctx, [byt(x, y, z, cam.yaw + Math.PI, Frame.Idle, lum)], 1);
 
     const barwy: number[] = [];
     for (let i = 0; i < zByt.chars.length; i++) {
@@ -174,11 +193,15 @@ describe('kontrast sprite do tła', () => {
       barwy.push(Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2));
     }
     barwy.sort((a, b) => a - b);
-    if (barwy.length === 0) return { med: 0, p05: 0 };
-    return { med: barwy[barwy.length >> 1] ?? 0, p05: barwy[Math.floor(barwy.length * 0.05)] ?? 0 };
+    if (barwy.length === 0) return { med: 0, p05: 0, komorek: 0 };
+    return {
+      med: barwy[barwy.length >> 1] ?? 0,
+      p05: barwy[Math.floor(barwy.length * 0.05)] ?? 0,
+      komorek: barwy.length,
+    };
   }
 
-  it('byt odcina się od każdego biomu, także z szesnastu metrów', () => {
+  it('byt widoczny odcina się od tła w każdym biomie', () => {
     // Progi z pomiaru, nie z sufitu. Zielony goblin sprzed zmiany dawał w lesie
     // medianę 24 i p05 20 — czyli zlewał się z liśćmi. Dystanse są tu inne niż
     // przy telegrafie i mają takie zostać: tu pytamy, czy zauważysz potwora,
@@ -186,10 +209,22 @@ describe('kontrast sprite do tła', () => {
     for (const scena of ['łąka', 'las', 'loch'] as const) {
       for (const m of [4, 8, 16]) {
         const k = kontrast(scena, m);
+        if (k.komorek === 0) continue; // niewidoczny — patrz test poniżej
         expect(k.med).toBeGreaterThan(60);
         expect(k.p05).toBeGreaterThan(40);
       }
     }
+  });
+
+  it('w lochu poza zasięgiem pochodni bytu nie widać wcale', () => {
+    // To nie jest luka w kontraście, tylko mechanika ciemności z M2: pod ziemią
+    // nie ma światła statycznego, więc jasność bytu bierze się wyłącznie
+    // z pochodni gracza. Zmierzone: 0,70 na czterech metrach, 0,45 na ośmiu,
+    // 0,00 na szesnastu. Test pilnuje, żeby ktoś tego kiedyś nie „naprawił"
+    // minimalnym oświetleniem otoczenia.
+    expect(kontrast('loch', 4).komorek).toBeGreaterThan(50);
+    expect(kontrast('loch', 8).komorek).toBeGreaterThan(20);
+    expect(kontrast('loch', 16).komorek).toBe(0);
   });
 
   it('atrament sprite wyraźnie różni się od atramentu tła', () => {
