@@ -54,6 +54,11 @@ export interface Being {
   ai: AiState;
   /** ms w bieżącym stanie — wychodzenie z pościgu jest funkcją czasu, nie losu */
   aiMs: number;
+  /**
+   * ms budżetu na cofanie się przy wyczerpaniu, odnawiany po złapaniu oddechu.
+   * Bez budżetu byt cofa się tak długo, jak długo gracz naciera — czyli bez końca.
+   */
+  retreatMs: number;
   /** ostatnia znana pozycja celu; tam idzie byt, który stracił go z oczu */
   seenX: number;
   seenY: number;
@@ -79,6 +84,7 @@ export function makeBeing(actor: Actor, x: number, y: number, z: number, yaw: nu
     runMps,
     ai: AiState.Idle,
     aiMs: 0,
+    retreatMs: 0,
     seenX: x,
     seenY: y,
     frame: 0,

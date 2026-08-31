@@ -12,7 +12,7 @@
  * graczem. Inaczej reguły musiałyby znać geometrię świata.
  */
 
-import { MOVE, PERCEPTION } from '@rpg/content';
+import { COMBAT, MOVE, PERCEPTION } from '@rpg/content';
 import { Stance } from './actor.js';
 import { AiState } from './being.js';
 import type { Being } from './being.js';
@@ -60,6 +60,24 @@ function moveTowards(b: Being, tx: number, ty: number, mps: number, out: Intent,
 }
 
 /**
+ * Wynik obsługi zamachu w tej klatce. **Każdy rozpoczęty cios kończy się jednym
+ * z tych stanów** — cichego braku wyniku nie ma, bo to on sprawiał, że goblin machał
+ * pałką bez żadnego efektu i bez wpisu w dzienniku. „Cios w powietrze" jest legalnym
+ * rezultatem walki; brak informacji nie jest.
+ */
+export const Swing = {
+  /** zamach jeszcze trwa albo bytu nie ma czym uderzyć */
+  None: 0,
+  /** cios doszedł i został rozstrzygnięty — szczegóły w `AttackResult` */
+  Resolved: 1,
+  /** cios doszedł, ale cel był poza zasięgiem broni */
+  OutOfReach: 2,
+  /** cios doszedł, ale cel był poza łukiem ciosu */
+  OffAngle: 3,
+} as const;
+export type Swing = (typeof Swing)[keyof typeof Swing];
+
+/**
  * Rozstrzyga cios bytu, jeśli właśnie doszedł. Zasięg sprawdza się **tutaj**, a nie
  * w `resolveAttack`, bo reguły walki nie znają pozycji — i dzięki temu ten sam kod
  * obsługuje gracza i potwora.
@@ -71,18 +89,26 @@ export function serviceSwing(
   rng: () => number,
   out: AttackResult,
   metersPerCell: number,
-): boolean {
-  if (!stepCombat(self.actor, dtMs)) return false;
+): Swing {
+  if (!stepCombat(self.actor, dtMs)) return Swing.None;
   const dx = foe.x - self.x;
   const dy = foe.y - self.y;
   const distM = Math.sqrt(dx * dx + dy * dy) * metersPerCell;
   // zasięg broni plus pół metra na objętość obu ciał
-  if (distM > weaponOf(self.actor).reachM + 0.5) return false;
+  if (distM > reachOf(self)) return Swing.OutOfReach;
   const kat = Math.atan2(dy, dx) - self.yaw;
   // cios idzie do przodu; obrót w trakcie zamachu nie naprowadza go na cel
-  if (Math.abs(Math.atan2(Math.sin(kat), Math.cos(kat))) > 0.9) return false;
+  if (Math.abs(Math.atan2(Math.sin(kat), Math.cos(kat))) > 0.9) return Swing.OffAngle;
   resolveAttack(self.actor, foe.actor, rng, out);
-  return true;
+  return Swing.Resolved;
+}
+
+/**
+ * Zasięg ciosu bytu: broń plus pół metra na objętość obu ciał. Jedna definicja dla
+ * AI i dla rozstrzygania — rozjazd między nimi znaczy zamachy, które nie mogą trafić.
+ */
+export function reachOf(self: Being): number {
+  return weaponOf(self.actor).reachM + 0.5;
 }
 
 /**
@@ -158,29 +184,43 @@ export function updateAi(
         enter(self, AiState.Hunting);
         break;
       }
-      // Wyczerpany byt **wycofuje się**, zamiast stać i próbować bić. Dwa powody:
-      // bez tego dwóch wyczerpanych przeciwników stoi naprzeciw siebie i starcie
-      // rozciąga się do kilkudziesięciu sekund (p95 z 12 s na 26 s w symulacji
-      // 10 000 pojedynków), a dla gracza cofający się potwór jest czytelnym
-      // sygnałem „jest zmęczony, teraz jest twoja chwila".
-      if (a.exhausted) {
-        endBlock(a);
-        // Cofa się **na dystans jednego kroku**, a nie w nieskończoność: byt
-        // uciekający póki nie odsapnie zamienia walkę w pogoń, w której szybszy
-        // jest ten, kto właśnie nie może bić. Po odsunięciu stoi i łapie oddech,
-        // a gracz ma czytelne zaproszenie, żeby podejść i to wykorzystać.
-        if (distM < reach * 1.4) {
+      // Wyczerpany byt **wycofuje się**, zamiast stać i próbować bić: dla gracza
+      // cofający się potwór jest czytelnym sygnałem „jest zmęczony, teraz jest
+      // twoja chwila", a bez tego dwaj wyczerpani stoją naprzeciw siebie i starcie
+      // rozciąga się do kilkudziesięciu sekund.
+      //
+      // Cofanie ma **budżet czasu** (`COMBAT.retreatMs`) i nie odpala się w trakcie
+      // zamachu. Bez budżetu gracz nacierający krok w krok spełnia warunek
+      // „przeciwnik blisko" w każdej klatce i spycha potwora przez pół lochu;
+      // bez drugiego warunku byt wycofywał się **w środku własnego ciosu** i sam
+      // wyprowadzał go poza zasięg — dziesięć z trzynastu zamachów kończyło się
+      // wtedy niczym.
+      if (a.exhausted && a.stance !== Stance.Windup) {
+        if (self.retreatMs > 0 && distM < reach * 1.4) {
+          self.retreatMs -= dtMs;
+          endBlock(a);
           moveTowards(self, self.x - dx, self.y - dy, self.walkMps, out, metersPerCell);
+          break;
         }
+        // budżet wyczerpany: staje i się zasłania, zamiast uciekać dalej
+        if (a.stance === Stance.Idle) beginBlock(a);
         break;
       }
+      if (!a.exhausted) self.retreatMs = COMBAT.retreatMs;
       // Byt w walce **domyka dystans**, jeśli odpłynął. Bez tego wystarczy, żeby raz
       // się cofnął (na przykład przy wyczerpaniu), a zostaje 2,6 m od gracza: poza
       // własnym zasięgiem, ale wciąż w stanie walki — i starcie nie kończy się nigdy.
-      if (distM > reach * 0.9) {
+      if (distM > reachOf(self) * 0.9) {
         moveTowards(self, player.x, player.y, self.walkMps, out, metersPerCell);
       }
       if (a.stance === Stance.Idle) {
+        // **Zamach wyłącznie z zasięgu.** Stan `fighting` sięga 1,6 zasięgu, więc
+        // bez tego warunku byt zaczynał ciosy z 2,8 m przy zasięgu 2,0 m i cios
+        // przepadał w ciszy: pomiar dał dziesięć takich na trzynaście zamachów.
+        if (distM > reachOf(self)) {
+          moveTowards(self, player.x, player.y, self.walkMps, out, metersPerCell);
+          break;
+        }
         // trzy czwarte ciosów, reszta to blok — przeciwnik, który tylko bije,
         // uczy gracza jednego ruchu i przestaje być groźny
         if (rng() < 0.75) {

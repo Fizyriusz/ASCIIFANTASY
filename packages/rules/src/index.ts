@@ -37,7 +37,7 @@ export { AiState, makeBeing } from './being.js';
 export type { Being } from './being.js';
 export { cellLight, hasLineOfSight, canSee, canHear } from './perception.js';
 export type { SightGrid } from './perception.js';
-export { updateAi, serviceSwing, makeIntent } from './ai.js';
+export { updateAi, serviceSwing, makeIntent, reachOf, Swing } from './ai.js';
 export type { Intent } from './ai.js';
 export {
   ItemKind,
