@@ -591,6 +591,13 @@ też w zrzucie snapshotowym), a **pasek wypełnia się `#`, nie blokiem** — st
 tekstu i musi mieć podobne pokrycie atramentem, inaczej oko czyta zmianę wartości
 jako migotanie (ta sama zasada co `INK_COVERAGE` w rampach).
 
+**Unik jest ruchem, nie znakiem** (M3f): przesuwa postać o metr w kierunku z klawiszy
+ruchu (bez klawisza — w tył), z profilem malejącym, którego całka po oknie daje dokładnie
+dystans z contentu. Sygnałem jest to, że świat jedzie w drugą stronę, więc nie ma
+znacznika; mechanika schowana pod symbolem przestaje być schowana. Przesunięcie idzie
+przez **tę samą kolizję co krok** (`apps/game/src/move.ts`) — dwie ścieżki ruchu znaczą
+dwie kolizje, a druga z nich prędzej czy później przepuści gracza przez ścianę.
+
 **Własne akcje** (M3f, `self.ts`): broń wchodzi w kadr od dołu przez czas zamachu swojej
 broni i znika w odbiciu — odbicie jest karą i ma wyglądać jak bezbronność. Blok jest
 **stanem**, więc jego znak jest stały i szeroki; unik jest **impulsem**, więc krótki
