@@ -674,7 +674,10 @@ Po M6: więcej contentu, nie więcej systemów. To jest moment, w którym takie 
   z contentu **typy, nigdy wartości**. Granica przebiega między kształtem danych
   a konkretną liczbą: świat deklaruje, czego potrzebuje, content to dostarcza. Test
   sprawdza też sam siebie — bez tego zmiana wyrażenia regularnego wyłączyłaby całą
-  asercję po cichu.
+  asercję po cichu. Testy i benchmarki w `core` i `world` mogą brać z contentu wartości,
+  ale **wyłącznie jako dane wejściowe pomiaru, nigdy jako wartość oczekiwaną**: test
+  rdzenia porównujący wynik z liczbą z paczki wild mierzy już nie silnik, tylko zgodność
+  z jedną grą, i zmiana balansu zaczyna psuć testy rdzenia.
 - **Starcie idzie ścieżką gry.** Test walki wywołuje `Bestiary.step` i tę samą kolizję
   ciał co ruch gracza — nie własną pętlę `x += vx * dt`. Powód jest z doświadczenia:
   symulacja 10 000 pojedynków dawała medianę starcia 5,2 s, podczas gdy w grze walka

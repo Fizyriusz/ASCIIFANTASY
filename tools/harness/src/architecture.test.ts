@@ -96,8 +96,11 @@ describe('kierunek zależności', () => {
     const zle: string[] = [];
     for (const paczka of ['packages/core', 'packages/world']) {
       for (const plik of pliki(join(ROOT, paczka))) {
-        // testy i benchmarki wolno karmić prawdziwą paczką contentu — to są dane
-        // wejściowe pomiaru, a nie zależność kodu, który trafia do gry
+        // Testy i benchmarki wolno karmić prawdziwą paczką contentu — to są dane
+        // wejściowe pomiaru, a nie zależność kodu, który trafia do gry. Fixture ma
+        // być **wyłącznie wejściem**, nigdy oczekiwaną wartością: test w rdzeniu
+        // porównujący wynik z liczbą z paczki wild przestaje mierzyć silnik, a zaczyna
+        // mierzyć zgodność z jedną grą — i wtedy zmiana balansu psuje testy rdzenia.
         if (plik.endsWith('.test.ts') || plik.endsWith('.bench.ts')) continue;
         const tresc = readFileSync(plik, 'utf8');
         for (const imp of importy(tresc)) {

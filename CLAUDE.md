@@ -181,7 +181,26 @@ git push --tags
 Powód: nagranie robi się zwykle później niż kod, a świat jest funkcją seeda **i kodu**.
 Ten sam seed po zmianie generatora daje inny teren, więc bez tagu materiał nagrany
 z M1 nie daje się odtworzyć po wejściu M2. Istniejące tagi:
-`m1-recording` (5224af3), `m2-recording` (edd3a42).
+`m1-recording` (5224af3), `m2-recording` (edd3a42), `m2c-recording`.
+
+**Kiedy zakładamy tag.** Wtedy, gdy nagranie sprzed niego przestaje pasować do nagrania
+po nim. Jeśli oba ujęcia dałoby się wkleić w ten sam odcinek i nikt nie zauważyłby szwu
+— tag jest zbędny. Tagujemy stany **odebrane w grze**, a nie każdy zamknięty milestone:
+M3b, M3d i M3f to z perspektywy oglądającego jedna rzecz i dostają jeden tag.
+
+Zaplanowane:
+
+| tag | co widać |
+|---|---|
+| `m3-recording` | postacie płaskie, walka działa |
+| `m3c-recording` | postacie jako bryły — pudełko, cieniowanie, wilk |
+
+M3e i M3g **nie dostają tagów**: pierwsze nie zmienia obrazu, drugie zmienia zachowanie,
+a nie wygląd.
+
+Kolejność nagrywania ma jedno ograniczenie: materiał do `m3c-recording` zbieramy
+**po M3e**, bo przed nim świat po kilkunastu minutach chodzenia przestaje rodzić byty
+i łatwo nagrać puste pustkowie na własne życzenie.
 
 ---
 
