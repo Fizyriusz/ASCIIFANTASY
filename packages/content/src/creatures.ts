@@ -140,4 +140,23 @@ export const WILD_SPAWN = {
   /** rozmiar grupy, włącznie z granicami */
   packMin: 1,
   packMax: 3,
+  /**
+   * komórki: w tym promieniu byty **istnieją** — są tickowane, widoczne i groźne.
+   * Poza nim nie ma ich wcale; nie chodzą sobie dalej, bo symulowanie pustkowia,
+   * którego nikt nie ogląda, kosztuje klatkę i niczego nie wnosi.
+   */
+  liveRadiusCells: 48,
+  /**
+   * komórki: dopiero za tym promieniem byt jest zwalniany. Histereza wobec
+   * `liveRadiusCells` — bez niej byt na granicy znikałby i wracał co klatkę,
+   * a razem z nim jego delta w zapisie.
+   */
+  releaseRadiusCells: 72,
+  /**
+   * Ile bytów naraz w pierścieniu. Sufit dotyczy **okolicy gracza**, a nie całej
+   * partii: liczony globalnie sprawiał, że po dobiciu do limitu świat przestawał
+   * rodzić byty wszędzie i na stałe (pomiar: 64 byty po 8 km marszu i ani jednego
+   * nowego przez kolejne 24 km).
+   */
+  ringCap: 24,
 } as const;
