@@ -43,19 +43,24 @@ export const COMBAT = {
   defPerDodgeSkill: 0.0015,
   /** ile obrony dokłada unik trafiony w oknie czasowym */
   defDodgeWindow: 0.45,
-  /** ms: jak długo trwa okno uniku po naciśnięciu */
-  dodgeWindowMs: 260,
+  /**
+   * ms: jak długo trwa okno uniku po naciśnięciu — i zarazem czas, na który rozłożone
+   * jest przesunięcie. Wydłużone z 260 ms, bo przy dystansie 2,2 m krótkie okno dawało
+   * szczyt 16,9 m/s i 27 cm przeskoku na klatkę: to czyta się jak teleport, nie uskok.
+   * Przy 480 ms szczyt spada do 9,2 m/s (dwa razy prędkość biegu) i 15 cm na klatkę.
+   */
+  dodgeWindowMs: 480,
   /**
    * metry: o ile unik **przesuwa** postać. Unik nie jest oknem nietykalności ze znaczkiem
    * obok, tylko ruchem — sygnałem dla gracza jest to, że świat jedzie w drugą stronę,
    * a nie symbol przy krawędzi kadru. Metr przy oknie 260 ms daje szarpnięcie
    * wyraźnie szybsze od biegu i wyhamowanie w miejscu.
    */
-  dodgeDistanceM: 1,
+  dodgeDistanceM: 2.2,
   /** ms: ile trwa bezradność po uniku — unik nie jest darmowy */
   dodgeRecoverMs: 340,
   /** wytrzymałość za unik */
-  dodgeStamina: 16,
+  dodgeStamina: 24,
 
   /** ułamek obrażeń zatrzymany przez udany blok */
   blockReduction: 0.65,
