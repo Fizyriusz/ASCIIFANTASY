@@ -88,6 +88,17 @@ zależności — projekt jest zły, zgłoś to zamiast obchodzić.
 - Poza hot path: normalny, czytelny TS. Nie optymalizuj tego, co nie jest w budżecie.
 - Wszystkie liczby balansu (obrażenia, ceny, czasy) w `packages/content`. Zmiana
   balansu nie może wymagać dotknięcia kodu.
+- **Żadnych literałów tekstowych widocznych dla gracza w kodzie.** Napisy są danymi,
+  tak samo jak liczby balansu — komunikaty walki, etykiety paneli, nazwy przedmiotów,
+  podpowiedzi sterowania. Powód jest tu mocniejszy niż zwykłe „bo lokalizacja": tekst
+  trafia do **siatki znaków o stałej szerokości**, więc jego długość jest częścią
+  układu, a nie kosmetyką. Napis dłuższy o trzy znaki nie „wygląda inaczej" — wychodzi
+  poza ramkę albo przykrywa sąsiednią kolumnę. Dlatego każdy napis potrzebuje **limitu
+  długości jako danej**, obok samej treści.
+- **Alfabet: łaciński i cyrylica.** CJK jest wykluczone: znaki podwójnej szerokości
+  rozjeżdżają siatkę, bo blit zakłada jedną komórkę na znak. Dopuszczenie ich znaczy
+  komórki dwuszerokościowe w blicie i w każdej mierze układu — to jest osobny projekt,
+  a nie ustawienie.
 - Funkcje generujące świat są **czyste**. Żadnego `Math.random()` w `packages/world`
   — wyłącznie `h32` / `mulberry32` z `@rpg/world/rng`. To jest sprawdzane testem.
 - Hash tekstury liczysz z **współrzędnych świata**, nigdy ekranu. Inaczej tekstura pływa.

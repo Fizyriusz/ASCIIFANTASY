@@ -669,6 +669,12 @@ Po M6: więcej contentu, nie więcej systemów. To jest moment, w którym takie 
 - **Właściwości symulacji** — po 365 dobach gry: brak ujemnych populacji, brak NaN w cenach,
   brak NPC uwięzionych w geometrii.
 - **Sanity questów** — 10 000 wygenerowanych instancji, żadna z nieosiągalnym slotem.
+- **Kierunek zależności jest asercją, nie umową.** `tools/harness/src/architecture.test.ts`
+  pilnuje, że `core` nie importuje niczego z warstw powyżej, a `core` i `world` biorą
+  z contentu **typy, nigdy wartości**. Granica przebiega między kształtem danych
+  a konkretną liczbą: świat deklaruje, czego potrzebuje, content to dostarcza. Test
+  sprawdza też sam siebie — bez tego zmiana wyrażenia regularnego wyłączyłaby całą
+  asercję po cichu.
 - **Starcie idzie ścieżką gry.** Test walki wywołuje `Bestiary.step` i tę samą kolizję
   ciał co ruch gracza — nie własną pętlę `x += vx * dt`. Powód jest z doświadczenia:
   symulacja 10 000 pojedynków dawała medianę starcia 5,2 s, podczas gdy w grze walka
@@ -801,6 +807,49 @@ w miejscu POI jest zbyt małe względem głębokości komory.
 
 Do rewizji przy ruinach i wejściach miejskich w M4, kiedy typów wejścia będzie kilka
 i wybór między nimi przestanie być pojedynczą stałą.
+
+---
+
+## 10a. Odłożone decyzje
+
+Rzeczy, o których **wiemy, że przyjdą**, z terminem i powodem, dla którego nie robimy
+ich teraz. To nie są długi techniczne (te są w §10) — tu nic nie jest zepsute, tylko
+świadomie niezaczęte.
+
+### Lokalizacja
+
+Dwa etapy, rozdzielone wolumenem tekstu:
+
+1. **Wyciągnięcie napisów do `locale/` — przed M4.** Jest tanie, bo dziś napisów jest
+   kilkadziesiąt, i domyka konwencję z `CLAUDE.md`: napis to dana z limitem długości,
+   bo siatka znaków ma stałą szerokość.
+2. **Machineria odmiany — dopiero przy questach (M5).** Szablony **całych zdań** per
+   język, rzeczowniki z przypadkami jako dane. Wcześniej nie ma na czym tego sprawdzić:
+   wolumen pojawia się razem z generowanymi questami.
+
+Zasada, której nie wolno złamać na skróty: **nie sklejamy zdań ze słów.** Polski rozpada
+się na przypadkach i rodzaju („zabiłeś goblina" / „zabiłaś wilczycę" / „dwa gobliny"),
+angielski to wybacza i dlatego kusi. Szablon zdania jest jednostką tłumaczenia.
+
+Alfabet zamknięty na łaciński i cyrylicę — patrz `CLAUDE.md`. CJK wymagałby komórek
+dwuszerokościowych w blicie, czyli zmiany w najgorętszej pętli renderu.
+
+### Wydzielenie silnika
+
+`core` + `world` to silnik, `content` plus liczby w `rules` to gra. Podział jest już
+widoczny w kodzie i pilnowany testem kierunku zależności (§9), ale **wydzielenie jako
+osobny pakiet robimy dopiero po M6**.
+
+Powód jest jeden: wydanie zamraża API, a rdzeń wciąż się przepisuje — M2c przepisało
+`raymarch.ts` w całości, wraz z modelem kolumny. Zamrożenie tego rok wcześniej znaczyłoby
+albo złamane API u odbiorców, albo renderer, którego nie wolno naprawić.
+
+Znane nieszczelności granicy, do posprzątania przy tej okazji:
+
+- **rozmnażanie bytów** w `apps/game/entities.ts` — to jest zawartość, nie silnik,
+  i powinno mieszkać obok reguł świata,
+- **generator lochu** w `packages/world` — kompozycja komór i korytarzy jest bliższa
+  zawartości niż geometrii; silnikowa jest tam sama praca na spanach.
 
 ---
 
