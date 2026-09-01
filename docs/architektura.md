@@ -602,10 +602,30 @@ a czas, po którym przeciwnik znów może uderzyć, rośnie z 0,60 do 0,82 s. Ok
 z 260 do 480 ms, bo przy krótszym szczyt prędkości wychodził 16,9 m/s i 27 cm przeskoku
 na klatkę — teleport zamiast uskoku.
 
-**Czego unik nie robi:** nie zostawia gracza poza zasięgiem na stałe. Po odbiciu (340 ms)
-przeciwnik jest z powrotem na 1,83 m, bo przekroczenie 1,6 zasięgu przełącza AI w pościg
-i wraca ona biegiem (3,8 m/s). Wartością uniku jest **uniknięty cios i czas**, nie
-utrzymany dystans — i tak trzeba go czytać przy strojeniu. Sygnałem jest to, że świat jedzie w drugą stronę, więc nie ma
+**Czego unik nie robi — i nie należy tego „naprawiać" dystansem.** Unik nie zostawia
+gracza poza zasięgiem na stałe. Po odbiciu (340 ms) przeciwnik jest z powrotem na 1,83 m,
+bo przekroczenie 1,6 zasięgu przełącza AI w pościg i wraca ona biegiem (3,8 m/s) —
+szybciej, niż da się odskoczyć. Dlatego przy dystansie 1,0 m końcowa odległość wynosiła
+1,91 m, a przy 2,2 m wynosi 1,83 m: **podnoszenie dystansu nie zmienia tej liczby**.
+Wartością uniku jest **uniknięty cios i czas** (0,82 s, w którym przeciwnik musi podejść
+i nie może uderzyć), a nie utrzymana odległość.
+
+Gdyby unik miał kiedyś naprawdę wyprowadzać z walki, lewary są dwa i żaden nie jest
+dystansem:
+
+- **krótka blokada pościgu po uniku** (preferowana) — przeciwnik przez chwilę wraca
+  krokiem, a nie biegiem. Zmiana w AI, czytelna dla gracza: widać, że przeciwnik
+  „zgubił tempo";
+- **skrócenie odbicia** — **odrzucone**. Odbicie jest ceną za wejście w unik i ma
+  zostać; skrócenie go zamienia unik w darmowy przeskok i psuje wybór między unikiem
+  a blokiem.
+
+**Czas ruchu i czas nietykalności to dwie osobne stałe** (`dodgeMoveMs`,
+`dodgeWindowMs`), choć dziś mają tę samą wartość. Odpowiadają na różne pytania:
+okno nietykalności jest regulatorem **balansu** (jego wydłużenie z 260 do 480 ms
+podniosło medianę 10 000 starć z 5,2 na 6,5 s), a czas ruchu regulatorem
+**czytelności** (ten sam dystans w krótszym czasie to wyższy szczyt prędkości i większy
+przeskok na klatkę). Reguły odpowiadają za pierwsze, warstwa gry za drugie. Sygnałem jest to, że świat jedzie w drugą stronę, więc nie ma
 znacznika; mechanika schowana pod symbolem przestaje być schowana. Przesunięcie idzie
 przez **tę samą kolizję co krok** (`apps/game/src/move.ts`) — dwie ścieżki ruchu znaczą
 dwie kolizje, a druga z nich prędzej czy później przepuści gracza przez ścianę.
