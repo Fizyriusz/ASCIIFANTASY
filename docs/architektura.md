@@ -591,9 +591,21 @@ też w zrzucie snapshotowym), a **pasek wypełnia się `#`, nie blokiem** — st
 tekstu i musi mieć podobne pokrycie atramentem, inaczej oko czyta zmianę wartości
 jako migotanie (ta sama zasada co `INK_COVERAGE` w rampach).
 
-**Unik jest ruchem, nie znakiem** (M3f): przesuwa postać o metr w kierunku z klawiszy
+**Unik jest ruchem, nie znakiem** (M3f): przesuwa postać o 2,2 m w kierunku z klawiszy
 ruchu (bez klawisza — w tył), z profilem malejącym, którego całka po oknie daje dokładnie
-dystans z contentu. Sygnałem jest to, że świat jedzie w drugą stronę, więc nie ma
+dystans z contentu.
+
+Dystans i okno są wyprowadzone z liczb walki, nie z gustu. Rozstrzyganie ciosu maczugi
+sięga 2,0 m, a AI trzyma dystans 1,8 m: metr uniku dawał szczyt oddalenia 2,44 m (1,2×
+zasięgu) i przeciwnik nie musiał nawet robić kroku. Przy 2,2 m szczyt to 2,88 m (1,44×),
+a czas, po którym przeciwnik znów może uderzyć, rośnie z 0,60 do 0,82 s. Okno wydłużone
+z 260 do 480 ms, bo przy krótszym szczyt prędkości wychodził 16,9 m/s i 27 cm przeskoku
+na klatkę — teleport zamiast uskoku.
+
+**Czego unik nie robi:** nie zostawia gracza poza zasięgiem na stałe. Po odbiciu (340 ms)
+przeciwnik jest z powrotem na 1,83 m, bo przekroczenie 1,6 zasięgu przełącza AI w pościg
+i wraca ona biegiem (3,8 m/s). Wartością uniku jest **uniknięty cios i czas**, nie
+utrzymany dystans — i tak trzeba go czytać przy strojeniu. Sygnałem jest to, że świat jedzie w drugą stronę, więc nie ma
 znacznika; mechanika schowana pod symbolem przestaje być schowana. Przesunięcie idzie
 przez **tę samą kolizję co krok** (`apps/game/src/move.ts`) — dwie ścieżki ruchu znaczą
 dwie kolizje, a druga z nich prędzej czy później przepuści gracza przez ścianę.

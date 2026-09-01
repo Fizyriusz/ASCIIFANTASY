@@ -108,13 +108,23 @@ patrząc, a nie licząc.
 
 Zasady uniku:
 
-- przesunięcie o **około metr** w kierunku wynikającym z klawiszy ruchu (bok albo tył);
-  **bez klawisza — w tył**,
-- rozłożone na czas okna uniku, z przyspieszeniem: szarpnięcie na starcie, wyhamowanie
-  na końcu,
+- przesunięcie o **2,2 m** w kierunku wynikającym z klawiszy ruchu (bok albo tył);
+  **bez klawisza — w tył**. Dystans jest wyprowadzony z zasięgu, nie z gustu:
+  rozstrzyganie ciosu maczugi sięga 2,0 m, sztyletu 1,7 m, a AI trzyma się w zwarciu
+  na 1,8 m — metr dawał więc szczyt oddalenia 2,44 m, czyli 1,2 zasięgu maczugi i pole
+  rażenia praktycznie bez przerwy,
+- rozłożone na czas okna uniku (**480 ms**), z przyspieszeniem: szarpnięcie na starcie,
+  wyhamowanie na końcu. Okno jest dłuższe niż pierwotne 260 ms, bo przy 2,2 m krótkie
+  okno dawało szczyt 16,9 m/s i 27 cm przeskoku na klatkę — to czyta się jak teleport.
+  Wydłużenie okna zamiast zmiękczenia profilu: przy 480 ms szczyt to 9,2 m/s, czyli
+  dwie prędkości biegu, i 15 cm na klatkę,
 - ruch idzie przez **tę samą kolizję co chodzenie**. Unik w ścianę ma nie działać,
   a nie przenikać — i to jest osobny punkt do sprawdzenia, bo to najłatwiejsze miejsce
   na przypadkowe wyjście poza geometrię.
+
+Koszt wytrzymałości rośnie z 16 do **24 punktów** (24% puli): unik wyprowadzający
+z walki jest wart więcej niż zamach mieczem (13%), więc ma kosztować więcej. Cztery
+uniki na pełnym pasku.
 
 Znacznik uniku z pierwszej wersji tego zlecenia **wypada**. Razem z nim znika pułapka
 miary „efekt globalny przejdzie każdy test różnicy" — bo nie ma już czego rysować.
@@ -162,7 +172,12 @@ reagujący opisz w podsumowaniu jako propozycję, razem z tym, jak wyglądałby 
    w klatce rozstrzygnięcia. Sprawdzone dla wszystkich trzech broni.
 4. **Unik jako ruch**: test, że pozycja gracza po uniku zmieniła się o zadany dystans
    (±20%) i w zadanym kierunku, oraz że unik w ścianę **nie przesuwa** — ta sama
-   kolizja co przy chodzeniu, żadnego przenikania.
+   kolizja co przy chodzeniu, żadnego przenikania. Ścianę sprawdzamy w komorze
+   **i w korytarzu**: przy dystansie większym niż szerokość przejścia to tam najłatwiej
+   wyjść za geometrię.
+4a. **Dystans wyprowadzony z zasięgu**: test porównujący `dodgeDistanceM` z `reachOf`
+   maczugi i sztyletu, oraz test szczytowej prędkości (ma być szybsza od biegu,
+   ale poniżej progu, przy którym świat przeskakuje).
 5. Budżet klatki bez zmian: rysowanie własnych akcji poniżej 0,1 ms.
 6. **Koszt celowania zmierzony:** ile procent ciosów, które trafiają dziś, przestaje
    trafiać po wprowadzeniu reguły — w normalnej walce na płaskim, przy graczu
