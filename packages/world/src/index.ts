@@ -12,6 +12,7 @@ export type {
 } from './types.js';
 export { SpanGrid, MAX_SPANS_PER_CELL } from './grid.js';
 export { buildNeonCity } from './packs/neon.js';
+export type { NeonMats } from './packs/neon.js';
 export { SEA_LEVEL, terrainHeight, terrainSlope, slopeFrom } from './terrain.js';
 export { riverSegments, waterLevelAt, carveHeight, waterAt, clearRiverCache } from './hydro.js';
 export type { RiverSegment } from './hydro.js';
@@ -34,7 +35,27 @@ export {
   bedrockUnder,
   clearDungeonCache,
 } from './dungeon.js';
-export type { DungeonGraph, DungeonRoom, DungeonCorridor, DungeonVoid } from './dungeon.js';
+export type {
+  DungeonGraph,
+  DungeonRoom,
+  DungeonCorridor,
+  DungeonVoid,
+  DungeonDweller,
+  DungeonLight,
+  DwellerRules,
+  LightRules,
+} from './dungeon.js';
+export { dungeonDwellers, dungeonLights } from './dungeon.js';
 export { structureAt, structuresNear, structureAtCell, StructurePart } from './structure.js';
 export type { Structure, StructureHit } from './structure.js';
 export { ChunkStore } from './streaming.js';
+export {
+  SAVE_VERSION,
+  serialize,
+  parse,
+  saveToStorage,
+  loadFromStorage,
+  clearStorage,
+  saveSizeBytes,
+} from './save.js';
+export type { GameSave, PlayerSave, EntitySave, StorageLike } from './save.js';

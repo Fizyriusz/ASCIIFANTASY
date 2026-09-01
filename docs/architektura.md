@@ -111,6 +111,21 @@ interface SaveFile {
 
 Zapis po 200 h gry powinien mieć < 2 MB. Jeśli rośnie szybciej — coś zapisujemy niepotrzebnie.
 
+**Stan po M3d** (`packages/world/src/save.ts`, `SAVE_VERSION = 2`). Działa: seed, zegar,
+pełny stan gracza z plecakiem, delty komórek, byty **z pochodzeniem** i flagi. Nie ma jeszcze frakcji ani questów — wejdą
+z M4 i M5, jako kolejne pola i podbicie `SAVE_VERSION`.
+
+Format na dysku jest **krotkowy**: span leży jako `[bottom, top, mat, capMat, flags]`,
+a delty jako lista par, nie obiekt. Powód jest zmierzony: przy 11 990 deltach
+z syntetycznych 200 godzin gry wychodzi **483 kB zamiast 1319 kB**, czyli 41 bajtów
+na deltę zamiast 113. Nazwy pól powtórzone przy każdym spanie kosztują tu więcej
+niż same liczby.
+
+`parse` zwraca `null` zamiast rzucać, a klucz delty o złym kształcie jest pomijany:
+źródłem jest `localStorage` albo plik od gracza, więc może być czymkolwiek. Gra ma
+wtedy zacząć nową partię, a nie się wywalić — i na pewno nie nadpisać przypadkowej
+komórki.
+
 ---
 
 ## 3. Renderer (`packages/core`)
@@ -292,11 +307,75 @@ i ta sama liczba jest czytana dla licowania ściany z sąsiedniej komórki.
 Konsekwencje rozgrywkowe za darmo: loch bez światła jest naprawdę nieczytelny, skradanie
 = `światło + hałas`, zaklęcie światła jest realnym przedmiotem użytkowym, noc ma znaczenie.
 
+### 3.3a Zawartość lochu: mieszkańcy i żagwie (M3d)
+
+Loch jest funkcją `(seed, poiId)`, więc jego **zawartość** też nią jest:
+`dungeonDwellers(seed, graph)` i `dungeonLights(seed, graph)` liczą się z
+`(seed, poiId, indeks komory)`. Nie z siatki powierzchni i nie z danych chunka —
+pozycje zapisane w chunku zmieniłyby jego hash zawartości, czyli test determinizmu
+i format zapisu.
+
+**Świat proponuje, gra dysponuje.** Generator zwraca miejsca, a sprawdzenie, czy
+sylwetka się w nich mieści (`surfaceHeight`, `blocks`), robi warstwa gry — bo to ona
+zna kolizję. Ta sama zasada, co przy `Intent` w AI.
+
+**Dlaczego to nie mogło być rozszerzeniem reguły powierzchniowej.** Klaster
+rozmnażania na powierzchni ma bok 16 komórek, zamieszkany jest co ósmy, a pozycja
+losuje się z całego klastra. Komora lochu to 3×6 do 8×4 komórek, czyli 7–12% jednego
+klastra — pomiar na najbliższym lochu od startu dał **zero mieszkańców w trzech
+pierwszych komorach**, mimo że wszystkie ich komórki nadawały się do postawienia bytu
+(18/18, 32/32, 28/28). Do tego klastry wokół wejścia zużywają się **na powierzchni**,
+zanim gracz zejdzie: 6 z 49 zamieszkanych, wszystkie oznaczone jako rozpatrzone.
+Trzy niezależne przyczyny, jeden skutek — pusty loch.
+
+**Ciemność zostaje stanem domyślnym.** Żagwie ma 30% komór, mediana trzy na loch,
+a test ciemności z M2 obowiązuje bez zmiany progów. `LightRig` ma twardy limit ośmiu
+źródeł i `addSource` po cichu zwraca `false`, więc gra karmi zestaw **najbliższymi**
+żagwiami, nie wszystkimi.
+
 ### 3.4 Sprite'y
 
-Sprite to `frames: string[][]` — siatka znaków, nie bitmapa. Skalowanie: próbkowanie
-najbliższego sąsiada z maski. Klatki: idle / walk×2 / attack / hit / death.
-Kolor z palety frakcji lub materiału. Duże potwory = po prostu większa siatka.
+Sprite to siatka znaków, nie bitmapa: `frames[klatka * 4 + kierunek]` w `Uint16Array`,
+gdzie zero znaczy przezroczysty. Skalowanie próbkuje najbliższego sąsiada. Klatki:
+`Idle`, `Walk0`, `Walk1`, `Attack`, `Hit`, `Death` — po cztery kierunki każda, wybierane
+kątem między zwrotem bytu a kierunkiem na kamerę, jak w Doomie. Bez kierunków NPC
+obraca się razem z graczem i czyta się jak naklejka.
+
+**Dwie skale, nie jedna.** Wysokość na ekranie liczy się z `kv` (metry na wiersz),
+a szerokość z długości wektora płaszczyzny (metry na kolumnę). To są różne wielkości,
+bo komórka znakowa nie jest kwadratem — wyprowadzenie szerokości z wysokości razy
+proporcje rysunku daje sprite'a rozdętego mniej więcej dwukrotnie. Dlatego byt ma
+w contencie **osobno** `heightM` i `widthM`.
+
+**Test głębi jest per komórka znakowa**, przeciwko `Screen.depth` (`Float32Array`
+o rozmiarze `cols * rows`, zapisywany w tym samym miejscu, w którym renderer maluje
+znak). Nie per kolumna: od M2 kolumna z otworem ma trzy różne głębokości i sprite
+w drzwiach musi być widoczny, a ten za ścianą — nie. Każdy piksel sprite'a **zapisuje**
+swoją głębokość, więc bliższy wygrywa niezależnie od kolejności listy i nie ma po co
+sortować.
+
+**Światło bierze się z bytu, nie z komórki.** `SpriteInstance.lum` wypełnia gra tym
+samym `lightAt`, którym renderer maluje powierzchnie — razem z pochodnią. Byt, którego
+barwa po kwantyzacji do 15 bitów wychodzi czarna, nie jest malowany wcale: potwór
+w ciemnym lochu jest niewidoczny i to jest mechanika, ta sama zasada co `Material.minLum`.
+
+Koszt: 60 bytów w kadrze to **0,032 ms** średniej (`pnpm bench`, `sprite.bench.ts`),
+przy renderze terenu rzędu 20 ms w vitest. Sprite'y nie są pozycją w budżecie klatki;
+bufor głębi kosztuje 4 bajty na komórkę, czyli 60 kB przy limicie 15 000 komórek.
+
+**Telegraf mieszka w górnym pasie rysunku** (M3b). Przy zwarciu — 1,4 m, czyli zasięg
+maczugi — widać **18% sylwetki**: głowę i barki, bo nogi są poza dolną krawędzią kadru.
+Dlatego klatka `Attack` rośnie w górę (uniesiona broń w wierszu, który w spokoju jest
+pusty), a nie w szerokość. Miara: procent **widocznych** komórek sprite'a, które różnią
+się między `Idle` a `Attack`, mierzony na 1,5 / 3 / 6 m — czyli tam, gdzie przeciwnik
+dosięga. Zmiana zapisana w wierszach poza ekranem nie istnieje.
+
+**Rozbłysk to podmiana barwy, nie podbicie jasności.** `SpriteInstance` ma opcjonalne
+`r`/`g`/`b` nadpisujące barwę na jedną klatkę. Luminancja powyżej jedynki jest przycinana
+przez `shade` do bieli, więc byt straciłby barwę zamiast błysnąć. Trafienie to klatka
+`Hit` przez 220 ms plus błysk 130 ms; cios **zablokowany** przez przeciwnika to sam
+błysk, bez klatki `Hit` — kontakt był, ale bez tej różnicy „zablokował" i „spudłowałeś"
+dają ten sam obraz.
 
 ### 3.5 Budżety
 
@@ -403,16 +482,98 @@ Dziennik: zapisuje *co gracz wie*, nie prawdę. Jeśli plotka kłamała, dzienni
 
 ## 6. Reguły gry (`packages/rules`)
 
-Minimum, które musi stać przed dodaniem czegokolwiek:
+Stan po M3. Wszystkie liczby są w `packages/content` (`COMBAT`, `PERCEPTION`, `MOVE`,
+`PLAYER`, `weapons`, `armors`) — zmiana balansu nie dotyka tej paczki.
 
-- **Atrybuty**: 6 sztuk (SIŁ ZRĘ KON INT WOL CHA), skille 0–100, rozwój przez użycie
-- **Walka**: real-time, prędkość broni, wytrzymałość (stamina) jako zasób, blok/unik na timing
-- **Trafienie**: `skill + atrybut + modyfikatory vs. obrona` — jeden rzut, bez tabelek
-- **Ekwipunek**: waga, sloty, zużycie, brak automatycznej regeneracji
-- **Magia**: konstruktor zaklęć (efekt × siła × czas × zasięg → koszt), nie lista 200 czarów
-- **Postęp**: poziom z sumy skilli, jak w Daggerfallu
+**Aktor.** Gracz i potwór to ten sam typ: hp, wytrzymałość, sześć atrybutów
+(SIŁ ZRĘ KON INT WOL CHA) i pięć umiejętności w jednej skali 0..100. Jedna skala,
+żeby wzór trafienia dodawał je wprost — przelicznik między skalami to miejsce,
+w którym balans przestaje być czytelny.
 
-Wszystkie liczby w `content/`, żeby balans nie wymagał dotykania kodu.
+**Postawa jest jednym polem** (`Idle`, `Windup`, `Recover`, `Blocking`, `Dodging`,
+`Stagger`, `Dead`). Dzięki temu blok w trakcie zamachu jest niemożliwy ze stanu,
+a nie dzięki sprawdzeniu, które da się przeoczyć.
+
+**Cios to odcinek czasu, nie zdarzenie**: `Windup` (już nie do cofnięcia) → trafienie →
+`Recover` (bezradność). Wybór broni jest więc decyzją o tym, ile sekund jesteś otwarty:
+sztylet 180/200 ms, maczuga 460/520 ms przy dwa razy większych obrażeniach.
+`stepCombat` zwraca `true` dokładnie w klatce dojścia ciosu, a zasięg sprawdza warstwa,
+która zna pozycje (`serviceSwing`) — reguły walki nie znają geometrii.
+
+**Trafienie jest celowane, ale bez stref ciała** (M3f). Warunek dojścia ciosu czyta
+trzy rzeczy: odległość poziomą, łuk w poziomie (`COMBAT.swingArcRad`, 0,55 rad — węższy
+niż połowa pola widzenia, żeby nie dało się trafić czegoś poza ekranem) oraz **okno
+pionowe**. Sylwetka celu zajmuje przedział kątów, nie punkt, więc porównujemy przedział
+z przedziałem i rozszerzamy go o margines z contentu. Przy 2 m goblin zajmuje od −8,5°
+(czubek głowy) do −40,4° (stopy), co znaczy, że patrzenie poziomo przed siebie **go mija**
+— i to jest cała reguła: trzeba patrzeć na przeciwnika, a wysokość bytu zaczyna mieć
+znaczenie (na wilka niżej niż na trolla).
+
+Po stronie AI kąt patrzenia niczego by nie ograniczał, bo byt celuje w środek sylwetki,
+więc tam rozstrzyga **pionowy zasięg ciosu** (`COMBAT.verticalReachM`). To jest warunek,
+przez który byt z przęsła mostu nie dosięga tego pod spodem — i odwrotnie.
+
+Koszt zmierzony ścieżką gry: gracz celujący w przeciwnika traci **0%** ciosów nawet przy
+rozrzucie ±20°; gracz patrzący poziomo przed siebie traci 100%.
+
+**Każdy zamach kończy się wynikiem.** `serviceSwing` zwraca `Swing`: rozstrzygnięty,
+poza zasięgiem albo poza łukiem ciosu — nigdy cicho. Wcześniej cios poza zasięgiem
+wychodził bez śladu i to była przyczyna błędu widocznego dopiero w grze: goblin machał
+pałką w kółko, nie zadając obrażeń i nie zostawiając wpisu w dzienniku (dziesięć takich
+zamachów na trzynaście). „Cios w powietrze" jest legalnym wynikiem walki; brak informacji
+nie jest. Z tego samego powodu AI zaczyna zamach **wyłącznie z zasięgu broni**
+(`reachOf` jest jedną definicją dla AI i dla rozstrzygania), a wyczerpany byt nie cofa
+się w trakcie własnego ciosu ani dłużej niż `COMBAT.retreatMs`.
+
+**Ciała są nieprzenikalne.** Ruch gracza pyta bestiariusz o zajęte miejsce; bez tego
+gracz wchodził w potwora (zmierzone 0,00 m dystansu po dziesięciu sekundach nacierania),
+a cofający się byt wyglądał, jakby dawał się przepychać chodzeniem.
+
+**Trafienie to jeden rzut**: `baza + umiejętność + zręczność − obrona`, klamrowany
+do 5–95%. Blok redukuje obrażenia i zjada wytrzymałość proporcjonalnie do tego, co
+zatrzymał — i pęka, gdy jej zabraknie. Unik ma krótkie okno i dłuższe odbicie, więc
+unik w ciemno jest gorszy niż unik w odpowiedzi na zamach.
+
+**Hp nie regeneruje się nigdy.** Regeneruje się wyłącznie wytrzymałość, a przeciążenie
+ją spowalnia (do 35% przy pełnym udźwigu i niżej już nie schodzi). Regeneracja hp
+z czasem zamienia wytrzymałość w dekorację, bo każde starcie da się przeczekać w kącie.
+
+**Wytrzymałość jest zasobem dzięki opóźnieniu regeneracji** (M3b): po zamachu, uniku
+i przebitym bloku nic nie wraca przez sekundę, czyli dłużej niż pełny cykl najwolniejszej
+broni. Dopóki bijesz, nie regenerujesz wcale. Za to sama regeneracja jest szybka (24/s),
+więc odpuszczenie ciosu na sekundę jest decyzją, a nie wyrokiem. Zmierzone: ciągły atak
+wyczerpuje pulę w 4,7–5,6 s każdą bronią (sztylet 14 ciosów, miecz 7, maczuga 5), przy
+starciu trwającym 5 s. Przed tą zmianą było to 15,7–21,3 s, czyli nigdy w trakcie walki.
+
+**Stan wyczerpania ma histerezę i jest ułamkiem puli**, nie liczbą punktów: wchodzi się
+poniżej 20% zapasu, wychodzi powyżej 34%. Próg pojedynczy migotał przy każdym tyknięciu
+regeneracji, a próg w punktach znaczyłby co innego dla gracza (pula 100) niż dla goblina
+(85).
+
+**Rozwój przez użycie**, logarytmiczny: 0→100 kosztuje około 2500 udanych zastosowań,
+czyli godziny gry. Nieudana próba też uczy, ćwiartką przyrostu — inaczej optymalną
+strategią jest bicie najsłabszego przeciwnika w grze.
+
+**Percepcja i AI.** `canSee` sprawdza po kolei dystans, stożek, światło i dopiero na
+końcu linię wzroku po siatce — od najtańszego do najdroższego, bo biegnie dla każdego
+bytu w każdej klatce. Światło bierze z **bytu**, nie z komórki, więc pochodnia zdradza
+i skradanie wychodzi z M2 za darmo, bez osobnego systemu ukrycia. Hałas jest osobnym
+kanałem i nie zależy od światła. AI to pięć stanów i `switch`
+(`idle → suspicious → hunting → fighting → fleeing`); ucieczka wygrywa ze wszystkim
+innym, bo przeciwnik walczący do śmierci sprawia, że świat wydaje się mechaniczny.
+AI **nie porusza bytem** — zapisuje zamiar (`Intent`), a przesunięcie z kolizją robi
+warstwa gry tym samym kodem, którym rusza graczem.
+
+Trzy reguły walki wręcz wyszły dopiero z symulacji grupy (M3b) i wszystkie dotyczą
+dystansu. Byt w `fighting` **domyka odległość**, gdy odpłynął ponad 0,9 swojego zasięgu —
+bez tego wystarczyło jedno cofnięcie, żeby stanął 2,6 m od gracza: poza własnym zasięgiem,
+ale wciąż „w walce", i starcie nie kończyło się nigdy. Wyczerpany **cofa się tylko
+o krok** (1,4 zasięgu) i tam łapie oddech; cofanie bez granicy zamieniało walkę w pogoń,
+w której szybszy jest ten, kto akurat nie może bić. Oba zachowania są przy okazji
+czytelnym sygnałem dla gracza — cofający się potwór znaczy „teraz jest twoja chwila".
+
+Magia (konstruktor zaklęć) i poziom postaci z sumy umiejętności — po M3, osobnym
+zadaniem. Konstruktor zaklęć jest projektem sam w sobie i nie mieści się w tym etapie.
 
 ---
 
@@ -420,6 +581,79 @@ Wszystkie liczby w `content/`, żeby balans nie wymagał dotykania kodu.
 
 Panele rysują się do tego samego bufora znaków co świat — ramki z `│ ─ ┌ ┐`, ta sama
 czcionka, ten sam bloom. Zero HTML overlay.
+
+Stan po M3: `panel.ts` (ramka, wiersz listy, pasek, tekst wyśrodkowany, barwy) plus
+trzy ekrany — ekwipunek, karta postaci, ekran śmierci. Pierwszy panel jest wzorcem
+dla następnych: panel, który rysuje sobie własne obramowanie znak po znaku, jest błędem,
+nawet gdy wygląda tak samo. Dwie decyzje warte zapamiętania: **kursor to znak `>`,
+nie inwersja koloru** (inwersja wymagałaby drugiego kanału na komórkę, a znak czyta się
+też w zrzucie snapshotowym), a **pasek wypełnia się `#`, nie blokiem** — stoi obok
+tekstu i musi mieć podobne pokrycie atramentem, inaczej oko czyta zmianę wartości
+jako migotanie (ta sama zasada co `INK_COVERAGE` w rampach).
+
+**Unik jest ruchem, nie znakiem** (M3f): przesuwa postać o 2,2 m w kierunku z klawiszy
+ruchu (bez klawisza — w tył), z profilem malejącym, którego całka po oknie daje dokładnie
+dystans z contentu.
+
+Dystans i okno są wyprowadzone z liczb walki, nie z gustu. Rozstrzyganie ciosu maczugi
+sięga 2,0 m, a AI trzyma dystans 1,8 m: metr uniku dawał szczyt oddalenia 2,44 m (1,2×
+zasięgu) i przeciwnik nie musiał nawet robić kroku. Przy 2,2 m szczyt to 2,88 m (1,44×),
+a czas, po którym przeciwnik znów może uderzyć, rośnie z 0,60 do 0,82 s. Okno wydłużone
+z 260 do 480 ms, bo przy krótszym szczyt prędkości wychodził 16,9 m/s i 27 cm przeskoku
+na klatkę — teleport zamiast uskoku.
+
+**Czego unik nie robi — i nie należy tego „naprawiać" dystansem.** Unik nie zostawia
+gracza poza zasięgiem na stałe. Po odbiciu (340 ms) przeciwnik jest z powrotem na 1,83 m,
+bo przekroczenie 1,6 zasięgu przełącza AI w pościg i wraca ona biegiem (3,8 m/s) —
+szybciej, niż da się odskoczyć. Dlatego przy dystansie 1,0 m końcowa odległość wynosiła
+1,91 m, a przy 2,2 m wynosi 1,83 m: **podnoszenie dystansu nie zmienia tej liczby**.
+Wartością uniku jest **uniknięty cios i czas** (0,82 s, w którym przeciwnik musi podejść
+i nie może uderzyć), a nie utrzymana odległość.
+
+Gdyby unik miał kiedyś naprawdę wyprowadzać z walki, lewary są dwa i żaden nie jest
+dystansem:
+
+- **krótka blokada pościgu po uniku** (preferowana) — przeciwnik przez chwilę wraca
+  krokiem, a nie biegiem. Zmiana w AI, czytelna dla gracza: widać, że przeciwnik
+  „zgubił tempo";
+- **skrócenie odbicia** — **odrzucone**. Odbicie jest ceną za wejście w unik i ma
+  zostać; skrócenie go zamienia unik w darmowy przeskok i psuje wybór między unikiem
+  a blokiem.
+
+**Czas ruchu i czas nietykalności to dwie osobne stałe** (`dodgeMoveMs`,
+`dodgeWindowMs`), choć dziś mają tę samą wartość. Odpowiadają na różne pytania:
+okno nietykalności jest regulatorem **balansu** (jego wydłużenie z 260 do 480 ms
+podniosło medianę 10 000 starć z 5,2 na 6,5 s), a czas ruchu regulatorem
+**czytelności** (ten sam dystans w krótszym czasie to wyższy szczyt prędkości i większy
+przeskok na klatkę). Reguły odpowiadają za pierwsze, warstwa gry za drugie. Sygnałem jest to, że świat jedzie w drugą stronę, więc nie ma
+znacznika; mechanika schowana pod symbolem przestaje być schowana. Przesunięcie idzie
+przez **tę samą kolizję co krok** (`apps/game/src/move.ts`) — dwie ścieżki ruchu znaczą
+dwie kolizje, a druga z nich prędzej czy później przepuści gracza przez ścianę.
+
+**Własne akcje** (M3f, `self.ts`): broń wchodzi w kadr od dołu przez czas zamachu swojej
+broni i znika w odbiciu — odbicie jest karą i ma wyglądać jak bezbronność. Blok jest
+**stanem**, więc jego znak jest stały i szeroki; unik jest **impulsem**, więc krótki
+i asymetryczny. Trzy różne decyzje mają wyglądać jak trzy różne rzeczy, a miarą tego jest
+próg 20 komórek różnicy między każdą parą postaw — ta sama miara, co przy wynikach ciosu
+w M3b. Do tego przygaszony celownik, bo od M3f pion decyduje o trafieniu i gracz musi
+widzieć, gdzie mierzy.
+
+Uwaga z pomiaru: pierwsza wersja rysunków broni miała 14 zamalowanych komórek i **nie
+przechodziła** progu 20 — sygnał, który w kodzie istnieje, a na ekranie ginie, jest
+sygnałem, którego nie ma.
+
+**Linia zdarzeń** (M3b, `log.ts`): dwie–trzy ostatnie rzeczy, które się stały, gasnące
+po sekundzie. Błysk i klatka trafienia mówią, *że* coś się stało; nie mówią *dlaczego*.
+„Przegrałem, bo zaatakowałem w odbiciu" jest zdaniem, nie obrazem — a w medium bez
+dźwięku i bez cząsteczek tekst jest naturalnym kanałem sprzężenia zwrotnego i idzie do
+tego samego bufora znaków co świat. Wpisy nazywają przyczynę („zablokowane", „brak
+wytrzymałości"), nie liczbę; powtórzony wpis odświeża istniejący, zamiast wypychać
+kolejkę. To nie są unoszące się liczby obrażeń: stała pozycja, stała długość kolejki.
+
+**Przyciemnienie kadru** (`fx.ts`) jest jedynym efektem działającym na cały bufor —
+odpowiedzią na oberwanie. Uwaga na miarę: efekt globalny zmienia każdą komórkę, więc
+snapshot niczego o nim nie powie. Mierzy się go spadkiem średniej luminancji, a snapshot
+robi z klatki po wygaśnięciu.
 
 Ekrany: ekwipunek, karta postaci, dziennik, mapa lokalna (rzut z góry z bufora komórek),
 mapa świata (kafle regionów), dialog, handel, odpoczynek/podróż.
@@ -474,6 +708,20 @@ Po M6: więcej contentu, nie więcej systemów. To jest moment, w którym takie 
 - **Właściwości symulacji** — po 365 dobach gry: brak ujemnych populacji, brak NaN w cenach,
   brak NPC uwięzionych w geometrii.
 - **Sanity questów** — 10 000 wygenerowanych instancji, żadna z nieosiągalnym slotem.
+- **Kierunek zależności jest asercją, nie umową.** `tools/harness/src/architecture.test.ts`
+  pilnuje, że `core` nie importuje niczego z warstw powyżej, a `core` i `world` biorą
+  z contentu **typy, nigdy wartości**. Granica przebiega między kształtem danych
+  a konkretną liczbą: świat deklaruje, czego potrzebuje, content to dostarcza. Test
+  sprawdza też sam siebie — bez tego zmiana wyrażenia regularnego wyłączyłaby całą
+  asercję po cichu. Testy i benchmarki w `core` i `world` mogą brać z contentu wartości,
+  ale **wyłącznie jako dane wejściowe pomiaru, nigdy jako wartość oczekiwaną**: test
+  rdzenia porównujący wynik z liczbą z paczki wild mierzy już nie silnik, tylko zgodność
+  z jedną grą, i zmiana balansu zaczyna psuć testy rdzenia.
+- **Starcie idzie ścieżką gry.** Test walki wywołuje `Bestiary.step` i tę samą kolizję
+  ciał co ruch gracza — nie własną pętlę `x += vx * dt`. Powód jest z doświadczenia:
+  symulacja 10 000 pojedynków dawała medianę starcia 5,2 s, podczas gdy w grze walka
+  nie rozstrzygała się wcale, bo AI zapisuje `Intent`, a bytem rusza `apps/game`.
+  Test, który omija tę warstwę, przepuszcza regresję w niej.
 - **Budżet klatki** — test wydajności w CI, próg twardy.
 
 ---
@@ -549,7 +797,7 @@ piksela** (materiał albo klasa powierzchni). Wtedy test czyta ten kanał, a ren
 nie musi wiedzieć, że jest testowany. Dopóki bufor ma tylko znak i barwę, hak zostaje —
 z tym wpisem, żeby nie udawał, że jest częścią modelu.
 
-### 10.2 Kolizja nie zna `SpanFlags.Stairs` — spłata w **M3**, razem z fizyką
+### 10.2 Kolizja nie zna `SpanFlags.Stairs` — **nie spłacone w M3**, termin: M4
 
 Ruch gracza zna jeden próg: `STEP_UP = 0,6 m`. Schodów nie rozpoznaje, mimo że
 flaga `Stairs` istnieje i generator ją ustawia. Skutek jest odwrotny do zamierzonego
@@ -563,8 +811,32 @@ na komórkę, bo tyle wolno. Kręte, strome zejście jest dziś niewyrażalne.
 
 Spłata: kolizja pytająca o flagę spanu — na `Stairs` obowiązuje inny próg (albo
 brak progu, z ograniczeniem prędkości). Wtedy `MAX_CLIMB` znika z generatora
-i długość biegu wraca do bycia decyzją kompozycyjną. Robimy to w M3, bo to ten
-sam obszar co reszta fizyki ruchu.
+i długość biegu wraca do bycia decyzją kompozycyjną.
+
+**Status po M3: nie spłacone.** Zlecenie M3 obejmowało postacie, walkę, ekwipunek
+i zapis; fizyki ruchu nie było na liście plików, a zmiana progu kolizji pociąga za sobą
+zmianę generatora lochu, czyli nowe złote pliki w module, którego M3 nie dotykało.
+Ruch potworów korzysta dziś z tej samej prymitywnej kolizji co gracz i ma ten sam
+problem: goblin nie wejdzie po schodach stromszych niż 0,55 m na komórkę. Termin
+przesunięty na M4, gdzie i tak wracamy do wejść i kompozycji lochu (§10.3).
+
+### 10.6 Klaster rozmnażania odtwarzany z pozycji bytu — **spłacone w M3d**
+
+Gobliny wychodzą z klastrów 16×16 komórek, a to, które klastry już wydały swoje byty,
+jest zapamiętane w zbiorze w pamięci (`Bestiary.seen`). W zapisie tego zbioru nie ma:
+po wczytaniu odtwarzamy go z **pozycji zapisanych bytów**. Działa to dokładnie tak
+długo, jak długo byt stoi w swoim klastrze. Potwór, który ścigał gracza przez trzy
+klastry i tam zginął, zostawia swój klaster nieoznaczony — i po wczytaniu ten klaster
+rodzi nowy komplet.
+
+Świadomie nie zapisujemy zbioru klastrów: rósłby bez ograniczeń wraz ze zwiedzonym
+terenem, a zapis ma być seedem plus deltami, nie dziennikiem odwiedzin.
+
+**Spłacone w M3d**: byt niesie `origin` (`"kx:ky"` dla klastra powierzchni,
+`"poi:komora"` dla lochu) i to pochodzenie idzie do zapisu, `SAVE_VERSION = 2`.
+Termin przyszedł wcześniej niż zakładany M4, bo mieszkaniec lochu psuł to mocniej
+niż byt na łące: wystarczyło, żeby wyszedł za graczem do korytarza, a po wczytaniu
+jego komora rodziła drugi komplet.
 
 ### 10.3 Wejście do jaskini jest kompozycją, nie emergentne — do rewizji w M4
 
@@ -577,6 +849,49 @@ w miejscu POI jest zbyt małe względem głębokości komory.
 
 Do rewizji przy ruinach i wejściach miejskich w M4, kiedy typów wejścia będzie kilka
 i wybór między nimi przestanie być pojedynczą stałą.
+
+---
+
+## 10a. Odłożone decyzje
+
+Rzeczy, o których **wiemy, że przyjdą**, z terminem i powodem, dla którego nie robimy
+ich teraz. To nie są długi techniczne (te są w §10) — tu nic nie jest zepsute, tylko
+świadomie niezaczęte.
+
+### Lokalizacja
+
+Dwa etapy, rozdzielone wolumenem tekstu:
+
+1. **Wyciągnięcie napisów do `locale/` — przed M4.** Jest tanie, bo dziś napisów jest
+   kilkadziesiąt, i domyka konwencję z `CLAUDE.md`: napis to dana z limitem długości,
+   bo siatka znaków ma stałą szerokość.
+2. **Machineria odmiany — dopiero przy questach (M5).** Szablony **całych zdań** per
+   język, rzeczowniki z przypadkami jako dane. Wcześniej nie ma na czym tego sprawdzić:
+   wolumen pojawia się razem z generowanymi questami.
+
+Zasada, której nie wolno złamać na skróty: **nie sklejamy zdań ze słów.** Polski rozpada
+się na przypadkach i rodzaju („zabiłeś goblina" / „zabiłaś wilczycę" / „dwa gobliny"),
+angielski to wybacza i dlatego kusi. Szablon zdania jest jednostką tłumaczenia.
+
+Alfabet zamknięty na łaciński i cyrylicę — patrz `CLAUDE.md`. CJK wymagałby komórek
+dwuszerokościowych w blicie, czyli zmiany w najgorętszej pętli renderu.
+
+### Wydzielenie silnika
+
+`core` + `world` to silnik, `content` plus liczby w `rules` to gra. Podział jest już
+widoczny w kodzie i pilnowany testem kierunku zależności (§9), ale **wydzielenie jako
+osobny pakiet robimy dopiero po M6**.
+
+Powód jest jeden: wydanie zamraża API, a rdzeń wciąż się przepisuje — M2c przepisało
+`raymarch.ts` w całości, wraz z modelem kolumny. Zamrożenie tego rok wcześniej znaczyłoby
+albo złamane API u odbiorców, albo renderer, którego nie wolno naprawić.
+
+Znane nieszczelności granicy, do posprzątania przy tej okazji:
+
+- **rozmnażanie bytów** w `apps/game/entities.ts` — to jest zawartość, nie silnik,
+  i powinno mieszkać obok reguł świata,
+- **generator lochu** w `packages/world` — kompozycja komór i korytarzy jest bliższa
+  zawartości niż geometrii; silnikowa jest tam sama praca na spanach.
 
 ---
 

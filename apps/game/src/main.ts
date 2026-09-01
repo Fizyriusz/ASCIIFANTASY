@@ -4,14 +4,67 @@ import {
   compileMaterials,
   computeMetrics,
   createRenderContext,
+  drawSprites,
   renderWorld,
   torchFlicker,
   pack15,
   DEFAULT_TARGET_COLS,
 } from '@rpg/core';
 import type { Camera } from '@rpg/core';
-import { wildPack } from '@rpg/content';
-import { CELL_METERS, ChunkStore, dungeonsNear } from '@rpg/world';
+import { Armor, COMBAT, FEEDBACK, PLAYER, MOVE, Weapon, wildPack } from '@rpg/content';
+import {
+  CELL_METERS,
+  ChunkStore,
+  dungeonsNear,
+  loadFromStorage,
+  mulberry32,
+  parse,
+  saveSizeBytes,
+  saveToStorage,
+  serialize,
+} from '@rpg/world';
+import type { DungeonGraph, GameSave } from '@rpg/world';
+import {
+  Stance,
+  addItem,
+  beginAttack,
+  beginBlock,
+  beginDodge,
+  endBlock,
+  equipArmor,
+  equipWeapon,
+  makeActor,
+  makeAttackResult,
+  makeBeing,
+  makeInventory,
+  removeItem,
+  serviceSwing,
+  stepCombat,
+  Swing,
+  syncWeight,
+  weaponOf,
+  ItemKind,
+} from '@rpg/rules';
+import {
+  bar,
+  drawCharacter,
+  drawDeath,
+  drawInventory,
+  drawCrosshair,
+  drawLog,
+  drawSelf,
+  dimScreen,
+  dodgeProgress,
+  windupProgress,
+  makeEventLog,
+  pushEvent,
+  tickLog,
+  EventKind,
+  UI,
+} from '@rpg/ui';
+import { Bestiary, aiLabel, animate } from './entities.js';
+import { dodgeSpeed, tryStep } from './move.js';
+import type { MobReport } from './entities.js';
 
 /**
  * Punkt wejścia: pętla, wejście, sklejenie całości. Cała geometria siedzi
@@ -134,6 +187,246 @@ let eyeTarget = cam.eyeZ;
 let dayPhase = START_HOUR;
 let torchOn = true;
 
+
+/* ---------------- postać, byty, zapis ---------------- */
+
+/**
+ * Gracz jest takim samym bytem jak goblin — różni się tym, kto podejmuje decyzje.
+ * Pozycję trzyma kamera i to ona jest źródłem prawdy; `player` ją tylko odzwierciedla,
+ * bo reguły i percepcja potrzebują bytu, a nie kamery.
+ */
+const player = makeBeing(
+  makeActor(PLAYER.hp, PLAYER.stamina, PLAYER.attrs, PLAYER.skills),
+  cam.x,
+  cam.y,
+  cam.eyeZ - PLAYER_EYE,
+  cam.yaw,
+  -1,
+  MOVE.walkMps,
+  MOVE.runMps,
+  PLAYER_HEIGHT,
+  PLAYER_EYE,
+);
+equipWeapon(player.actor, Weapon.Shortsword);
+equipArmor(player.actor, Armor.Leather);
+
+const pack = makeInventory();
+addItem(pack, ItemKind.Weapon, Weapon.Dagger, player.actor);
+addItem(pack, ItemKind.Weapon, Weapon.Club, player.actor);
+addItem(pack, ItemKind.Armor, Armor.Mail, player.actor);
+
+const bestiary = new Bestiary(SEED, world);
+const attack = makeAttackResult();
+/** Losowość walki. Osobny strumień od świata, żeby ruch gracza nie zmieniał terenu. */
+const combatRng = mulberry32(SEED ^ 0x00c0ffee);
+const mobReport: MobReport = {
+  damage: 0,
+  swung: false,
+  blocked: false,
+  dodged: false,
+  missed: false,
+  whiffed: false,
+};
+/** ile żagwi świeci w tej klatce — do HUD-u, bo limit zestawu jest cichy */
+let zrodel = 0;
+/** ms: ile jeszcze trwa reakcja kadru na oberwanie (przyciemnienie + drganie) */
+let hurtMs = 0;
+/** kierunek trwającego uniku, zapamiętany w chwili jego rozpoczęcia */
+let dodgeDir = { dx: 0, dy: 0 };
+/**
+ * ms: ile zostało z **przesunięcia** uniku. Osobny licznik od `actor.dodgeMs`, bo ten
+ * drugi mierzy okno nietykalności: reguły odpowiadają za to, czy cios mija, a warstwa
+ * gry za to, jak daleko i jak szybko postać się przesuwa.
+ */
+let dodgeMoveLeft = 0;
+/** dziennik zdarzeń walki — dwie–trzy linijki gasnące po sekundzie */
+const events = makeEventLog();
+
+/** Który panel jest otwarty. Panel przejmuje klawiaturę i zwalnia pointer lock. */
+const Panel = { None: 0, Inventory: 1, Character: 2, Dead: 3 } as const;
+let panel: number = Panel.None;
+let cursor = 0;
+let deathCause = '';
+/** czy w przeglądarce leży zapis — ekran śmierci pokazuje z tego inną podpowiedź */
+let hasSave = loadFromStorage(localStorage) !== null;
+
+function note(text: string, kind: EventKind = EventKind.Neutral): void {
+  pushEvent(events, text, kind);
+}
+
+/**
+ * Reakcja kadru na oberwanie: przyciemnienie i drganie, oba krótkie. Drganie
+ * **nie rusza `cam.yaw`** — jest doliczane wyłącznie na czas rysowania, bo inaczej
+ * trafienie przesuwałoby celownik i psuło następny cios gracza. To ta sama zasada,
+ * przez którą odrzuciliśmy wygładzanie myszy w M2c: nic, co rusza celowaniem.
+ */
+function shakeAt(t: number): number {
+  if (hurtMs <= 0) return 0;
+  const faza = hurtMs / FEEDBACK.shakeMs;
+  return Math.sin(t * 0.001 * FEEDBACK.shakeHz * Math.PI * 2) * FEEDBACK.shakeAmp * faza;
+}
+
+
+
+function openPanel(which: number): void {
+  panel = which;
+  cursor = 0;
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+}
+
+/* ---------------- zapis ---------------- */
+
+function snapshot(): GameSave {
+  const a = player.actor;
+  return {
+    version: 1,
+    seed: SEED,
+    clock: dayPhase * 24 * 60,
+    cellDeltas: {},
+    flags: {},
+    player: {
+      x: cam.x,
+      y: cam.y,
+      z: player.z,
+      yaw: cam.yaw,
+      pitch: cam.pitch,
+      hp: a.hp,
+      maxHp: a.maxHp,
+      stamina: a.stamina,
+      maxStamina: a.maxStamina,
+      attrs: Array.from(a.attrs),
+      skills: Array.from(a.skills),
+      progress: Array.from(a.progress),
+      weapon: a.weapon,
+      armor: a.armor,
+      weaponWear: a.weaponWear,
+      armorWear: a.armorWear,
+      items: pack.items.map((i) => [i.kind, i.index] as [number, number]),
+    },
+    entities: bestiary.toSave(),
+  };
+}
+
+function saveGame(): void {
+  const save = snapshot();
+  if (saveToStorage(localStorage, save)) {
+    hasSave = true;
+    note(`zapisano (${(saveSizeBytes(save) / 1024).toFixed(1)} kB)`);
+  } else {
+    note('zapis się nie udał');
+  }
+}
+
+/**
+ * Eksport do pliku. Na Vercelu nie ma backendu, więc jedyny trwały nośnik poza
+ * `localStorage` to plik na dysku gracza — a `localStorage` znika razem z wyczyszczeniem
+ * danych witryny, czego gracz robiący porządki nie wiąże z utratą stu godzin gry.
+ */
+function exportSave(): void {
+  const text = serialize(snapshot());
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ascii-rpg-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  note('wyeksportowano do pliku');
+}
+
+/** Import z pliku: ten sam `parse`, więc uszkodzony plik daje komunikat, a nie awarię. */
+function importSave(): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (file === undefined) return;
+    void file.text().then((text) => {
+      const save = parse(text);
+      if (save === null) {
+        note('plik nie jest zapisem tej gry');
+        return;
+      }
+      saveToStorage(localStorage, save);
+      hasSave = true;
+      loadGame();
+    });
+  });
+  input.click();
+}
+
+function loadGame(): void {
+  const save = loadFromStorage(localStorage);
+  if (save === null) {
+    note('brak zapisu');
+    return;
+  }
+  const p = save.player;
+  const a = player.actor;
+  a.hp = p.hp;
+  a.maxHp = p.maxHp;
+  a.stamina = p.stamina;
+  a.maxStamina = p.maxStamina;
+  for (let i = 0; i < a.attrs.length; i++) a.attrs[i] = p.attrs[i] ?? 40;
+  for (let i = 0; i < a.skills.length; i++) a.skills[i] = p.skills[i] ?? 0;
+  for (let i = 0; i < a.progress.length; i++) a.progress[i] = p.progress[i] ?? 0;
+  a.weapon = p.weapon;
+  a.armor = p.armor;
+  a.weaponWear = p.weaponWear;
+  a.armorWear = p.armorWear;
+  a.stance = Stance.Idle;
+  a.stanceMs = 0;
+  pack.items.length = 0;
+  for (const [kind, index] of p.items) pack.items.push({ kind: kind as 0 | 1, index });
+  syncWeight(pack, a);
+  dayPhase = (save.clock / (24 * 60)) % 1;
+  bestiary.restore(save.entities);
+  panel = Panel.None;
+  land(p.x, p.y, p.yaw);
+  cam.pitch = p.pitch;
+  note('wczytano zapis');
+}
+
+/* ---------------- walka ---------------- */
+
+/**
+ * Cios gracza rozstrzyga się przeciw najbliższemu żywemu bytowi. `stepCombat`
+ * musi biec **co klatkę**, także wtedy, gdy nie ma na kogo trafić — inaczej zamach
+ * w powietrze nigdy się nie kończy i postać zostaje zablokowana w zamachu.
+ */
+function playerCombat(dtMs: number): void {
+  const target = bestiary.nearest(cam.x, cam.y);
+  if (target === null) {
+    // `stepCombat` musi biec co klatkę także wtedy, gdy nie ma w co trafić —
+    // inaczej zamach w powietrze nigdy się nie kończy
+    stepCombat(player.actor, dtMs);
+    return;
+  }
+  const cios = serviceSwing(player, target.being, dtMs, combatRng, attack, CELL_METERS);
+  if (cios === Swing.None) return;
+  if (cios !== Swing.Resolved) {
+    // Cios doszedł, ale nie miał kogo dosięgnąć. To jest wynik, a nie brak wyniku —
+    // bez tego wpisu gracz nie odróżnia „za daleko" od „nic się nie stało".
+    note(cios === Swing.OutOfReach ? 'cios w powietrze — za daleko' : 'cios w powietrze', EventKind.Neutral);
+    return;
+  }
+
+  if (attack.killed) {
+    bestiary.markHit(target);
+    note('goblin pada', EventKind.Good);
+  } else if (attack.blocked) {
+    bestiary.markBlocked(target);
+    note('goblin zablokował', EventKind.Neutral);
+  } else if (attack.dodged) {
+    note('goblin uskoczył', EventKind.Neutral);
+  } else if (attack.landed) {
+    bestiary.markHit(target);
+    note(attack.staggered ? 'trafiony, zachwiał się' : 'trafiony', EventKind.Good);
+  } else {
+    note('pudło', EventKind.Neutral);
+  }
+}
+
 /**
  * Skok do najbliższego wejścia do jaskini i z powrotem — klawisz `G`.
  *
@@ -142,11 +435,32 @@ let torchOn = true;
  * biegu. Wraca tam, skąd skoczyłeś, więc nie gubi kontekstu.
  */
 let jumpBack: { x: number; y: number; yaw: number } | null = null;
+/** loch, po którym chodzimy klawiszem `G`, i przystanek w nim (0 = wejście) */
+let caveGraph: DungeonGraph | null = null;
+let caveStop = 0;
 
 function jumpToCave(): void {
+  // Trzy przystanki, nie dwa: wejście → komora → powrót. Komora doszła w M3d,
+  // bo zawartość lochu (mieszkańcy, żagwie) zaczyna się dopiero pod stropem,
+  // a dojście tam od wejścia to kilkanaście sekund biegu przy każdym sprawdzeniu.
+  if (jumpBack !== null && caveGraph !== null && caveStop === 0) {
+    const g = caveGraph;
+    // najgłębsza komora: tam kończy się loch i tam warto zajrzeć najpierw
+    let best = g.rooms[0];
+    for (const r of g.rooms) {
+      if (best === undefined || r.level > best.level) best = r;
+    }
+    if (best !== undefined) {
+      caveStop = 1;
+      land(best.x + best.w / 2, best.y + best.h / 2, 0, best.ceilZ);
+      return;
+    }
+  }
   if (jumpBack !== null) {
     const back = jumpBack;
     jumpBack = null;
+    caveGraph = null;
+    caveStop = 0;
     land(back.x, back.y, back.yaw);
     return;
   }
@@ -164,6 +478,8 @@ function jumpToCave(): void {
   }
   if (best === null) return;
   jumpBack = { x: cam.x, y: cam.y, yaw: cam.yaw };
+  caveGraph = best;
+  caveStop = 0;
   // kolano wcięcia: stoi się w wąwozie, twarzą do wylotu tunelu
   land(
     best.mouthX + best.mouthDirX * 4 + 0.5,
@@ -172,12 +488,18 @@ function jumpToCave(): void {
   );
 }
 
-function land(x: number, y: number, yaw: number): void {
+/**
+ * Stawia gracza w podanym miejscu. `maxZ` jest pułapem szukania gruntu i jest
+ * konieczny przy skoku do komory lochu: bez niego `surfaceHeight` znajduje
+ * najwyższą czapkę, czyli **łąkę nad lochem**, i teleport ląduje na trawie
+ * zamiast pod ziemią.
+ */
+function land(x: number, y: number, yaw: number, maxZ = 1e6): void {
   cam.x = x;
   cam.y = y;
   cam.yaw = yaw;
   world.loadRing(cam);
-  const surf = world.surfaceHeight(Math.floor(x), Math.floor(y), 1e6);
+  const surf = world.surfaceHeight(Math.floor(x), Math.floor(y), maxZ);
   if (Number.isFinite(surf)) {
     eyeTarget = surf + PLAYER_EYE;
     cam.eyeZ = eyeTarget;
@@ -221,17 +543,104 @@ const keys: Record<string, boolean> = Object.create(null) as Record<string, bool
 
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
+  if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'Space') e.preventDefault();
+
+  // Panel przejmuje klawiaturę w całości: gracz, który omyłkiem biegnie
+  // z otwartym plecakiem, to najprostszy sposób na śmierć bez własnej winy.
+  if (panel !== Panel.None) {
+    panelKey(e.code);
+    return;
+  }
+
   if (e.code === 'KeyF') torchOn = !torchOn;
   // skok o pół doby: jedyny sposób zobaczyć noc bez czekania czterech minut
   if (e.code === 'KeyN') dayPhase = (dayPhase + 0.5) % 1;
   if (e.code === 'KeyG') jumpToCave();
-  if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'Space') e.preventDefault();
+  if (e.code === 'KeyI') openPanel(Panel.Inventory);
+  if (e.code === 'KeyC') openPanel(Panel.Character);
+  if (e.code === 'F5') {
+    e.preventDefault();
+    saveGame();
+  }
+  if (e.code === 'F9') {
+    e.preventDefault();
+    loadGame();
+  }
+  if (e.code === 'F6') {
+    e.preventDefault();
+    exportSave();
+  }
+  if (e.code === 'F7') {
+    e.preventDefault();
+    importSave();
+  }
+  if (e.code === 'Space') {
+    if (beginDodge(player.actor)) {
+      // kierunek zapamiętujemy w chwili wejścia: unik ma iść tam, dokąd gracz
+      // się ruszał, a nie tam, gdzie obróci się w trakcie
+      dodgeDir = dodgeDirection();
+      dodgeMoveLeft = COMBAT.dodgeMoveMs;
+    } else if (player.actor.stance === Stance.Idle) {
+      note('brak wytrzymałości na unik', EventKind.Bad);
+    }
+  }
 });
+
+/** Klawisze paneli. Osobna funkcja, bo panel to inny tryb gry, a nie inny widok. */
+function panelKey(code: string): void {
+  if (panel === Panel.Dead) {
+    if (code === 'KeyR' && hasSave) loadGame();
+    return;
+  }
+  if (code === 'KeyQ' || code === 'Escape' || code === 'KeyI' || code === 'KeyC') {
+    panel = Panel.None;
+    return;
+  }
+  if (panel !== Panel.Inventory) return;
+  if (code === 'ArrowUp') cursor = Math.max(0, cursor - 1);
+  if (code === 'ArrowDown') cursor = Math.min(pack.items.length - 1, cursor + 1);
+  if (code === 'Enter') equipAt(cursor);
+}
+
+/**
+ * Zakłada przedmiot spod kursora. Dotychczasowy wraca do plecaka, więc waga się
+ * zgadza bez osobnego licznika — `syncWeight` jest jedynym miejscem, które ją ustawia.
+ */
+function equipAt(index: number): void {
+  const it = pack.items[index];
+  if (it === undefined) return;
+  const a = player.actor;
+  const previous = it.kind === ItemKind.Weapon ? a.weapon : a.armor;
+  removeItem(pack, index, a);
+  if (previous !== null) addItem(pack, it.kind, previous, a);
+  if (it.kind === ItemKind.Weapon) equipWeapon(a, it.index);
+  else equipArmor(a, it.index);
+  cursor = Math.min(cursor, Math.max(0, pack.items.length - 1));
+}
 window.addEventListener('keyup', (e) => {
   keys[e.code] = false;
 });
 canvas.addEventListener('click', () => {
-  if (document.pointerLockElement !== canvas) void canvas.requestPointerLock();
+  if (panel === Panel.None && document.pointerLockElement !== canvas) {
+    void canvas.requestPointerLock();
+  }
+});
+// prawy przycisk trzyma blok, więc menu kontekstowe musi zniknąć
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('mousedown', (e) => {
+  if (panel !== Panel.None || document.pointerLockElement !== canvas) return;
+  // Odmowa akcji musi być widoczna w tej samej klatce, w której padła. Kliknięcie,
+  // po którym nie dzieje się nic, gracz czyta jako zgubione wejście, a nie jako
+  // karę za własną decyzję — i przestaje ufać sterowaniu.
+  if (e.button === 0 && !beginAttack(player.actor)) {
+    if (player.actor.stamina < weaponOf(player.actor).stamina) {
+      note('brak wytrzymałości', EventKind.Bad);
+    }
+  }
+  if (e.button === 2) beginBlock(player.actor);
+});
+canvas.addEventListener('mouseup', (e) => {
+  if (e.button === 2) endBlock(player.actor);
 });
 /**
  * Rozkład |movement| w kubełkach dwójkowych: <2, <8, <32, <128, <512, reszta.
@@ -284,18 +693,52 @@ window.addEventListener('resize', resize);
  * Próba przesunięcia na nową pozycję. Kolizja jest celowo prymitywna — próg,
  * ściana i głębina; reszta to zakres późniejszych zadań.
  */
+const CIALO = { heightM: PLAYER_HEIGHT, stepUpM: STEP_UP, wadeM: WADE_DEPTH };
+
 function tryMove(nx: number, ny: number): void {
-  const cx = Math.floor(nx);
-  const cy = Math.floor(ny);
-  const feet = eyeTarget - PLAYER_EYE;
-  const surf = world.surfaceHeight(cx, cy, feet + STEP_UP);
-  if (!Number.isFinite(surf)) return; // chunk jeszcze się nie policzył
-  if (world.blocks(cx, cy, surf + 0.05, surf + PLAYER_HEIGHT)) return;
-  const water = world.waterLevel(cx, cy);
-  if (water !== null && water - surf > WADE_DEPTH) return;
-  cam.x = nx;
-  cam.y = ny;
-  eyeTarget = surf + PLAYER_EYE;
+  // Ciała są nieprzenikalne. Bez tego gracz wchodził w potwora (zmierzone 0,00 m
+  // dystansu), a odsuwający się byt wyglądał, jakby dawał się przepychać.
+  const krok = tryStep(world, eyeTarget - PLAYER_EYE, nx, ny, CIALO, (x, y) =>
+    bestiary.occupied(x, y, MOVE.bodyRadiusM * 2),
+  );
+  if (krok === null) return;
+  cam.x = krok.x;
+  cam.y = krok.y;
+  eyeTarget = krok.surfZ + PLAYER_EYE;
+}
+
+/**
+ * Kierunek uniku, w komórkach świata. Bierze się z klawiszy ruchu — bok albo tył —
+ * a bez klawisza jest **w tył**: unik ma odsuwać od tego, na co patrzysz.
+ */
+function dodgeDirection(): { dx: number; dy: number } {
+  const dirX = Math.cos(cam.yaw);
+  const dirY = Math.sin(cam.yaw);
+  let fwd = 0;
+  let strafe = 0;
+  if (keys['KeyW'] || keys['ArrowUp']) fwd += 1;
+  if (keys['KeyS'] || keys['ArrowDown']) fwd -= 1;
+  if (keys['KeyD']) strafe += 1;
+  if (keys['KeyA']) strafe -= 1;
+  if (fwd === 0 && strafe === 0) fwd = -1;
+  const x = dirX * fwd - dirY * strafe;
+  const y = dirY * fwd + dirX * strafe;
+  const len = Math.hypot(x, y) || 1;
+  return { dx: x / len, dy: y / len };
+}
+
+/**
+ * Przesunięcie uniku. Idzie przez **tę samą kolizję co chodzenie** (`tryMove`), więc
+ * unik w ścianę nie działa, zamiast przenikać — a osobno w X i Y, żeby ześlizgiwał się
+ * po przeszkodzie tak samo jak krok.
+ */
+function stepDodge(dt: number): void {
+  if (dodgeMoveLeft <= 0) return;
+  const v =
+    dodgeSpeed(dodgeMoveLeft, COMBAT.dodgeMoveMs, COMBAT.dodgeDistanceM) / CELL_METERS;
+  tryMove(cam.x + dodgeDir.dx * v * dt, cam.y);
+  tryMove(cam.x, cam.y + dodgeDir.dy * v * dt);
+  dodgeMoveLeft -= dt * 1000;
 }
 
 /**
@@ -351,7 +794,12 @@ function frame(t: number): void {
   prevT = t;
   if (dt > 0) fps += (1 / dt - fps) * 0.1;
 
-  step(dt);
+  const dtMs = dt * 1000;
+  const zyje = player.actor.stance !== Stance.Dead;
+  if (panel === Panel.None && zyje) {
+    step(dt);
+    stepDodge(dt);
+  }
   if (dt > 0) {
     const k = dt * EYE_SMOOTH;
     cam.eyeZ += (eyeTarget - cam.eyeZ) * (k > 1 ? 1 : k);
@@ -370,8 +818,96 @@ function frame(t: number): void {
   // najwyżej jeden chunk na klatkę — pusta krawędź świata jest mniej dotkliwa
   // niż zacinka, a przy prędkości marszu i tak nie zdążymy jej zobaczyć
   world.update(cam);
+
+  // Byt gracza idzie za kamerą: pozycja ma jedno źródło prawdy, a reguły
+  // i percepcja i tak potrzebują bytu, nie kamery.
+  player.x = cam.x;
+  player.y = cam.y;
+  player.z = eyeTarget - PLAYER_EYE;
+  player.yaw = cam.yaw;
+  // Od M3f pion decyduje o trafieniu, więc kąt patrzenia jest częścią stanu bytu.
+  player.pitch = cam.pitch;
+  player.running = (keys['ShiftLeft'] || keys['ShiftRight']) === true;
+  player.lum = bestiary.lumAt(render.light, cam.x, cam.y, player.z);
+
+  if (zyje && panel !== Panel.Inventory && panel !== Panel.Character) {
+    // bieg kosztuje wytrzymałość, inaczej nie ma powodu chodzić
+    if (player.running) {
+      player.actor.stamina = Math.max(
+        0,
+        player.actor.stamina - MOVE.runStaminaPerSec * dt,
+      );
+    }
+    bestiary.spawnAround(cam.x, cam.y, player.z);
+    playerCombat(dtMs);
+    animate(player, { vx: 0, vy: 0, running: player.running }, dtMs);
+    bestiary.step(player, dtMs, render.light, combatRng, attack, mobReport);
+    if (mobReport.damage > 0) {
+      hurtMs = FEEDBACK.hurtDimMs;
+      note('oberwałeś', EventKind.Bad);
+    } else if (mobReport.blocked) {
+      note('zablokowane', EventKind.Good);
+    } else if (mobReport.dodged) {
+      note('uskoczyłeś', EventKind.Good);
+    } else if (mobReport.missed) {
+      note('minął cię', EventKind.Neutral);
+    } else if (mobReport.whiffed) {
+      // zamach, który nie miał czego dosięgnąć — też jest informacją: byłeś poza
+      // zasięgiem jego pałki, więc ten moment jest twoją okazją
+      note('goblin machnął w powietrze', EventKind.Neutral);
+    }
+    if (player.actor.hp <= 0 && player.actor.stance === Stance.Dead) {
+      deathCause = 'zabity przez goblina';
+      openPanel(Panel.Dead);
+    }
+  }
+  tickLog(events, dtMs);
+
+  // Drganie doliczamy wyłącznie na czas rysowania i zaraz cofamy — `cam` zostaje
+  // źródłem prawdy o tym, gdzie gracz celuje.
+  const drgania = shakeAt(t);
+  const yaw0 = cam.yaw;
+  const pitch0 = cam.pitch;
+  cam.yaw += drgania;
+  cam.pitch += drgania * 0.5;
+  // Żagwie lochu: najbliższe źródła trafiają do zestawu przed renderem. Zestaw ma
+  // twardy limit ośmiu, więc wybór jest po odległości, a nie po kolejności w liście.
+  zrodel = bestiary.feedLights(render.light, cam.x, cam.y);
   renderWorld(world, cam, screen, render);
+  drawSprites(screen, cam, render, bestiary.spriteList(), bestiary.mobs.length);
+  cam.yaw = yaw0;
+  cam.pitch = pitch0;
+
+  // Własne akcje rysują się na wierzchu geometrii, ale pod wskaźnikami: broń jest
+  // bliżej niż cokolwiek w świecie, a HUD ma zostać czytelny nawet w błysku.
+  if (panel === Panel.None) {
+    drawSelf(screen, {
+      windup: windupProgress(
+        player.actor.stanceMs,
+        weaponOf(player.actor),
+        player.actor.stance === Stance.Windup,
+      ),
+      blocking: player.actor.stance === Stance.Blocking,
+      dodge: player.actor.stance === Stance.Dodging ? dodgeProgress(player.actor.dodgeMs) : 0,
+      lum: player.lum,
+      weapon: weaponOf(player.actor),
+    });
+    drawCrosshair(screen, player.lum);
+  }
+
+  if (hurtMs > 0) {
+    // im bliżej końca efektu, tym jaśniej — przyciemnienie ma zakłuć, nie oślepić
+    const faza = hurtMs / FEEDBACK.hurtDimMs;
+    // po świecie i sprite'ach, a przed HUD-em: przyciemnienie dotyczy obrazu,
+    // a nie wskaźników, które w tym momencie są najbardziej potrzebne
+    dimScreen(screen, 1 - (1 - FEEDBACK.hurtDim) * faza);
+    hurtMs -= dtMs;
+  }
+
   drawHud();
+  if (panel === Panel.Inventory) drawInventory(screen, player.actor, pack, cursor);
+  else if (panel === Panel.Character) drawCharacter(screen, player.actor);
+  else if (panel === Panel.Dead) drawDeath(screen, deathCause, dayPhase * 24, hasSave);
   blit(
     screen,
     ctx!,
@@ -400,7 +936,7 @@ function drawHud(): void {
   screen.text(
     1,
     2,
-    `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}  pochodnia ${torchOn ? 'tak' : 'nie'}`,
+    `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}  pochodnia ${torchOn ? 'tak' : 'nie'}  żagwie ${zrodel}  byty ${bestiary.mobs.length}`,
     HUD_DIM,
   );
   // Pomiar rozkładu ruchu myszy: kubełki, maksimum i licznik odrzuceń. Zostaje
@@ -415,9 +951,66 @@ function drawHud(): void {
   screen.text(
     1,
     screen.rows - 1,
-    'WASD + mysz (klik = pointer lock), Shift = bieg, F = pochodnia, N = pół doby, G = jaskinia',
+    'WASD, LPM cios, PPM blok, Spacja unik, I plecak, C karta, F5/F9 zapis, F6/F7 plik, F pochodnia, G jaskinia/komora',
     HUD_DIM,
   );
+
+  drawVitals();
+}
+
+/**
+ * Paski życia i wytrzymałości w lewym dolnym rogu, w tym samym buforze co świat.
+ * Liczby stoją obok pasków, bo przy walce w czasie rzeczywistym pasek mówi „ile
+ * zostało", a liczba — „czy zdążę jeszcze jeden cios".
+ */
+function drawVitals(): void {
+  const a = player.actor;
+  const y = screen.rows - 4;
+  screen.text(1, y, 'ZDR', UI.dim);
+  bar(screen, 5, y, 22, a.hp, a.maxHp, hurtMs > 0 ? UI.text : UI.bad);
+  screen.text(28, y, `${Math.ceil(a.hp)}/${a.maxHp}`, HUD_COLOR);
+
+  screen.text(1, y + 1, 'WYT', a.exhausted ? UI.bad : UI.dim);
+  bar(screen, 5, y + 1, 22, a.stamina, a.maxStamina, a.exhausted ? UI.bad : UI.good);
+
+  if (a.exhausted) {
+    // Stan trwa aż do progu wyjścia i jest widoczny poza samym paskiem — moment
+    // wyczerpania jest najważniejszą chwilą walki i nie może wymagać wpatrywania
+    // się w słupek.
+    screen.text(1, y, 'ZDR', UI.dim);
+    screen.text(28, y + 1, 'WYCZERPANY', UI.bad);
+  }
+
+  const stan =
+    a.stance === Stance.Windup
+      ? 'zamach'
+      : a.stance === Stance.Recover
+        ? 'odbicie'
+        : a.stance === Stance.Blocking
+          ? 'blok'
+          : a.stance === Stance.Dodging
+            ? 'unik'
+            : a.stance === Stance.Stagger
+              ? 'wytrącony'
+              : '';
+  if (stan !== '') screen.text(28, y + 1, stan, UI.accent);
+
+  const near = bestiary.nearest(cam.x, cam.y);
+  if (near !== null) {
+    const d = Math.hypot(near.being.x - cam.x, near.being.y - cam.y) * CELL_METERS;
+    if (d < 40) {
+      screen.text(
+        1,
+        y + 2,
+        `goblin ${d.toFixed(0)} m  ${aiLabel(near.being.ai)}  ${Math.ceil(near.being.actor.hp)} hp`,
+        d < 4 ? UI.bad : HUD_DIM,
+      );
+    }
+  }
+  // Dziennik rośnie w GÓRĘ od wiersza nad wskaźnikami: w dół nie ma miejsca,
+  // bo tam stoi linia pomocy, a nachodzenie dwóch tekstów na siebie czyta się
+  // jak błąd renderu.
+  drawLog(screen, 1, y - 2, events);
 }
 
 resize();

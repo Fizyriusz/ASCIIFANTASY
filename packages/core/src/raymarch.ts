@@ -630,11 +630,12 @@ export function renderColumn(
             if (wallM.emissive > 0) lum += (1 - lum) * wallM.emissive;
             packed = fogShade(wallM, lum, fog, skyM, skyLum, faceAccess);
             if (packed < 0) continue;
-            screen.putUnsafe(
+            screen.putDepth(
               col,
               row,
               materialGlyph(wallM, lum * fog, uMetres, zRow, wallAxisM, wallFoot),
               packed,
+              dEnterM,
             );
           }
 
@@ -701,11 +702,12 @@ export function renderColumn(
               // w poprzek: przy horyzoncie jeden wiersz to dziesiątki metrów
               capFoot = dCapM / den;
               if (dCapM / kh > capFoot) capFoot = dCapM / kh;
-              screen.putUnsafe(
+              screen.putDepth(
                 col,
                 row,
                 materialGlyph(capM, lum * capFog, capXm, capYm, top, capFoot),
                 packed,
+                dCapM,
               );
             }
             while (maskTop <= maskBot && cover[maskTop] === 1) maskTop++;
@@ -747,11 +749,12 @@ export function renderColumn(
             if (packed < 0) continue;
             capFoot = dCapM / den;
             if (dCapM / kh > capFoot) capFoot = dCapM / kh;
-            screen.putUnsafe(
+            screen.putDepth(
               col,
               row,
               materialGlyph(wallM, lum * capFog, capXm, capYm, bottom, capFoot),
               packed,
+              dCapM,
             );
           }
           while (maskTop <= maskBot && cover[maskTop] === 1) maskTop++;

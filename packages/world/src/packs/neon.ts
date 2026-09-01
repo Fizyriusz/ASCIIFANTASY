@@ -11,8 +11,24 @@
  * i `ref-pitch-up` zależą od każdej liczby poniżej co do bajta.
  */
 
-import { NeonMat } from '@rpg/content';
 import type { MaterialId, Span, SpanFlagMask } from '../types.js';
+
+/**
+ * Indeksy materiałów, których używa ta scena. **Parametr, nie import z contentu**:
+ * `packages/world` może znać kształt danych, ale nie ich wartości — inaczej konkretna
+ * paczka settingu byłaby zaszyta w silniku. Kształt jest zgodny z `NeonMat`, więc
+ * wywołujący podaje go wprost.
+ */
+export interface NeonMats {
+  Asphalt: MaterialId;
+  Pavement: MaterialId;
+  Grass: MaterialId;
+  Stone: MaterialId;
+  Glass: MaterialId;
+  Plaster: MaterialId;
+  Lamp: MaterialId;
+  Wood: MaterialId;
+}
 import { SpanFlags } from '../types.js';
 import { h32, mulberry32, vnoise } from '../rng.js';
 import { SpanGrid } from '../grid.js';
@@ -46,7 +62,7 @@ function span(
  * budynków 1–3 komórek, wysokości z szumu. Świadomie prymitywne — jedyne, co
  * musi być prawdą, to determinizm i sensowne proporcje do oglądania renderera.
  */
-export function buildNeonCity(seed: number): SpanGrid {
+export function buildNeonCity(seed: number, mats: NeonMats): SpanGrid {
   const grid = new SpanGrid(CITY_SIZE, CITY_SIZE);
 
   // 1. teren: jezdnia, chodnik, trawnik działki
@@ -56,9 +72,9 @@ export function buildNeonCity(seed: number): SpanGrid {
       const nextToRoad =
         !road &&
         (isRoad(x + 1, y) || isRoad(x - 1, y) || isRoad(x, y + 1) || isRoad(x, y - 1));
-      const capMat = road ? NeonMat.Asphalt : nextToRoad ? NeonMat.Pavement : NeonMat.Grass;
+      const capMat = road ? mats.Asphalt : nextToRoad ? mats.Pavement : mats.Grass;
       const topZ = road ? 0 : nextToRoad ? 0.2 : 0.15;
-      grid.setColumn(x, y, [span(-4, topZ, NeonMat.Stone, capMat, SpanFlags.Solid)]);
+      grid.setColumn(x, y, [span(-4, topZ, mats.Stone, capMat, SpanFlags.Solid)]);
     }
   }
 
@@ -76,7 +92,7 @@ export function buildNeonCity(seed: number): SpanGrid {
       const w = 1 + ((lot() * 3) | 0);
       const d = 1 + ((lot() * 3) | 0);
       const height = 4 + Math.pow(density, 2.2) * 34 * (0.4 + 0.6 * lot());
-      const wallMat = lot() < 0.35 ? NeonMat.Glass : lot() < 0.7 ? NeonMat.Plaster : NeonMat.Stone;
+      const wallMat = lot() < 0.35 ? mats.Glass : lot() < 0.7 ? mats.Plaster : mats.Stone;
 
       for (let dy = 0; dy < d; dy++) {
         for (let dx = 0; dx < w; dx++) {
@@ -89,8 +105,8 @@ export function buildNeonCity(seed: number): SpanGrid {
           }
           if (grid.spanCount(bx, by) > 1) continue;
           grid.setColumn(bx, by, [
-            span(-4, 0.15, NeonMat.Stone, NeonMat.Grass, SpanFlags.Solid),
-            span(0.15, height, wallMat, NeonMat.Stone, SpanFlags.Solid),
+            span(-4, 0.15, mats.Stone, mats.Grass, SpanFlags.Solid),
+            span(0.15, height, wallMat, mats.Stone, SpanFlags.Solid),
           ]);
           grid.setLight(bx, by, 12);
         }
@@ -104,8 +120,8 @@ export function buildNeonCity(seed: number): SpanGrid {
       if (isRoad(x, y) || grid.spanCount(x, y) > 1) continue;
       if ((x & 15) !== 4 || (y & 15) !== 4) continue;
       grid.setColumn(x, y, [
-        span(-4, 0.2, NeonMat.Stone, NeonMat.Pavement, SpanFlags.Solid),
-        span(0.2, 4.2, NeonMat.Lamp, NeonMat.Lamp, SpanFlags.Solid | SpanFlags.Emissive),
+        span(-4, 0.2, mats.Stone, mats.Pavement, SpanFlags.Solid),
+        span(0.2, 4.2, mats.Lamp, mats.Lamp, SpanFlags.Solid | SpanFlags.Emissive),
       ]);
     }
   }
@@ -116,8 +132,8 @@ export function buildNeonCity(seed: number): SpanGrid {
   const bridgeY = 32;
   for (let x = 28; x <= 36; x++) {
     grid.setColumn(x, bridgeY, [
-      span(-4, isRoad(x, bridgeY) ? 0 : 0.2, NeonMat.Stone, NeonMat.Asphalt, SpanFlags.Solid),
-      span(5, 5.8, NeonMat.Wood, NeonMat.Wood, SpanFlags.Solid),
+      span(-4, isRoad(x, bridgeY) ? 0 : 0.2, mats.Stone, mats.Asphalt, SpanFlags.Solid),
+      span(5, 5.8, mats.Wood, mats.Wood, SpanFlags.Solid),
     ]);
   }
   return grid;

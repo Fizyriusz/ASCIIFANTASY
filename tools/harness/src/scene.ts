@@ -104,7 +104,7 @@ export function wildContext(): RenderContext {
 }
 
 export function referenceCity(): SpanGrid {
-  return buildNeonCity(REFERENCE.seed);
+  return buildNeonCity(REFERENCE.seed, NeonMat);
 }
 
 function span(bottom: number, top: number, mat: number, capMat: number): Span {
@@ -377,7 +377,7 @@ export function nightScene(): { store: ChunkStore; camera: Camera; ctx: RenderCo
 /** Miasto z odłożonej paczki — dowód, że setting da się wymienić bez ruszania kodu. */
 export function neonCityScene(): { grid: SpanGrid; camera: Camera } {
   return {
-    grid: buildNeonCity(REFERENCE.seed),
+    grid: buildNeonCity(REFERENCE.seed, NeonMat),
     camera: { x: 33.0, y: 26.5, eyeZ: 1.7, yaw: Math.PI / 2, pitch: 0.1, fov: (74 * Math.PI) / 180 },
   };
 }

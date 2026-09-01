@@ -88,6 +88,17 @@ zależności — projekt jest zły, zgłoś to zamiast obchodzić.
 - Poza hot path: normalny, czytelny TS. Nie optymalizuj tego, co nie jest w budżecie.
 - Wszystkie liczby balansu (obrażenia, ceny, czasy) w `packages/content`. Zmiana
   balansu nie może wymagać dotknięcia kodu.
+- **Żadnych literałów tekstowych widocznych dla gracza w kodzie.** Napisy są danymi,
+  tak samo jak liczby balansu — komunikaty walki, etykiety paneli, nazwy przedmiotów,
+  podpowiedzi sterowania. Powód jest tu mocniejszy niż zwykłe „bo lokalizacja": tekst
+  trafia do **siatki znaków o stałej szerokości**, więc jego długość jest częścią
+  układu, a nie kosmetyką. Napis dłuższy o trzy znaki nie „wygląda inaczej" — wychodzi
+  poza ramkę albo przykrywa sąsiednią kolumnę. Dlatego każdy napis potrzebuje **limitu
+  długości jako danej**, obok samej treści.
+- **Alfabet: łaciński i cyrylica.** CJK jest wykluczone: znaki podwójnej szerokości
+  rozjeżdżają siatkę, bo blit zakłada jedną komórkę na znak. Dopuszczenie ich znaczy
+  komórki dwuszerokościowe w blicie i w każdej mierze układu — to jest osobny projekt,
+  a nie ustawienie.
 - Funkcje generujące świat są **czyste**. Żadnego `Math.random()` w `packages/world`
   — wyłącznie `h32` / `mulberry32` z `@rpg/world/rng`. To jest sprawdzane testem.
 - Hash tekstury liczysz z **współrzędnych świata**, nigdy ekranu. Inaczej tekstura pływa.
@@ -170,7 +181,26 @@ git push --tags
 Powód: nagranie robi się zwykle później niż kod, a świat jest funkcją seeda **i kodu**.
 Ten sam seed po zmianie generatora daje inny teren, więc bez tagu materiał nagrany
 z M1 nie daje się odtworzyć po wejściu M2. Istniejące tagi:
-`m1-recording` (5224af3), `m2-recording` (edd3a42).
+`m1-recording` (5224af3), `m2-recording` (edd3a42), `m2c-recording`.
+
+**Kiedy zakładamy tag.** Wtedy, gdy nagranie sprzed niego przestaje pasować do nagrania
+po nim. Jeśli oba ujęcia dałoby się wkleić w ten sam odcinek i nikt nie zauważyłby szwu
+— tag jest zbędny. Tagujemy stany **odebrane w grze**, a nie każdy zamknięty milestone:
+M3b, M3d i M3f to z perspektywy oglądającego jedna rzecz i dostają jeden tag.
+
+Zaplanowane:
+
+| tag | co widać |
+|---|---|
+| `m3-recording` | postacie płaskie, walka działa |
+| `m3c-recording` | postacie jako bryły — pudełko, cieniowanie, wilk |
+
+M3e i M3g **nie dostają tagów**: pierwsze nie zmienia obrazu, drugie zmienia zachowanie,
+a nie wygląd.
+
+Kolejność nagrywania ma jedno ograniczenie: materiał do `m3c-recording` zbieramy
+**po M3e**, bo przed nim świat po kilkunastu minutach chodzenia przestaje rodzić byty
+i łatwo nagrać puste pustkowie na własne życzenie.
 
 ---
 

@@ -27,6 +27,17 @@ export class Screen {
   chars: Uint16Array;
   /** kolor skwantyzowany do 15 bitów (patrz color.ts) */
   colors: Uint16Array;
+  /**
+   * Odległość powierzchni w metrach, **na komórkę znakową**, nie na kolumnę.
+   *
+   * Jedna liczba na kolumnę nie wystarcza od M2: kolumna z otworem ma wiersze nad
+   * drzwiami, w ich świetle i pod nimi na trzech różnych głębokościach, więc sprite
+   * stojący w przejściu byłby albo wycięty, albo widoczny przez ścianę. Cztery bajty
+   * na komórkę to 60 kB przy budżecie 15 000 komórek.
+   *
+   * `Infinity` znaczy „tu jest niebo albo nic" — wszystko jest bliżej.
+   */
+  depth: Float32Array;
 
   cols = 0;
   rows = 0;
@@ -36,6 +47,7 @@ export class Screen {
     this.rows = rows;
     this.chars = new Uint16Array(cols * rows);
     this.colors = new Uint16Array(cols * rows);
+    this.depth = new Float32Array(cols * rows);
   }
 
   /** Realokuje bufory. Wołać wyłącznie przy zmianie rozmiaru okna. */
@@ -45,10 +57,12 @@ export class Screen {
     this.rows = rows;
     this.chars = new Uint16Array(cols * rows);
     this.colors = new Uint16Array(cols * rows);
+    this.depth = new Float32Array(cols * rows);
   }
 
   clear(): void {
     this.chars.fill(EMPTY);
+    this.depth.fill(Number.POSITIVE_INFINITY);
   }
 
   /** Bez sprawdzania zakresu — hot path. Wywołujący gwarantuje poprawność. */
@@ -56,6 +70,18 @@ export class Screen {
     const i = row * this.cols + col;
     this.chars[i] = ch;
     this.colors[i] = color;
+  }
+
+  /**
+   * To samo co `putUnsafe`, ale zapisuje też głębokość. Osobna metoda, żeby jeden
+   * indeks liczył się raz — renderer świata woła wyłącznie tę wersję, a UI i sprite'y
+   * tę bez głębokości.
+   */
+  putDepth(col: number, row: number, ch: number, color: number, dist: number): void {
+    const i = row * this.cols + col;
+    this.chars[i] = ch;
+    this.colors[i] = color;
+    this.depth[i] = dist;
   }
 
   /** Wersja bezpieczna — dla UI, nie dla renderu świata. */

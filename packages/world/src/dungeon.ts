@@ -17,6 +17,7 @@
  */
 
 import { h32, mulberry32 } from './rng.js';
+import { CELL_METERS } from './types.js';
 import { terrainHeight, terrainSlope } from './terrain.js';
 
 /** komórki między kandydatami na loch */
@@ -691,4 +692,136 @@ export function bedrockUnder(floorZ: number): number {
 /** Wyłącznie do testów: czyści memoizację grafów. */
 export function clearDungeonCache(): void {
   cache.clear();
+}
+
+/* ------------------------------------------------------------------ *
+ * Zawartość lochu: mieszkańcy i światło (M3d)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Byt zamieszkujący komorę. Wynik jest **czystą funkcją `(seed, poiId, indeks komory)`**,
+ * a nie stanem zapisanym w chunku — dokładnie z tego samego powodu, dla którego cały
+ * graf jest funkcją POI: pozycje w danych chunka zmieniłyby jego hash zawartości,
+ * czyli test determinizmu i format zapisu.
+ *
+ * Świat wyłącznie **proponuje** miejsce. Sprawdzenie, czy sylwetka się w nim mieści,
+ * należy do warstwy gry, bo to ona zna kolizję — tutaj nie ma dostępu do spanów.
+ */
+/**
+ * Ile bytów wystawiać w komorach. **Parametr, nie import**: `packages/world` nie może
+ * sięgać po wartości z contentu, bo to odwróciłoby kierunek zależności — świat ma
+ * deklarować, czego potrzebuje, a paczka contentu to dostarczać. Kształt jest zgodny
+ * z `DUNGEON_SPAWN`, więc gra podaje go wprost.
+ */
+export interface DwellerRules {
+  roomChance: number;
+  entryRoomChance: number;
+  packMin: number;
+  packMax: number;
+  perLevel: number;
+  kind: number;
+}
+
+/** Analogicznie dla żagwi; kształt zgodny z `DUNGEON_LIGHT`. */
+export interface LightRules {
+  roomChance: number;
+  perRoomMin: number;
+  perRoomMax: number;
+  heightM: number;
+}
+
+export interface DungeonDweller {
+  /** indeks w `graph.rooms` — to jest zarazem pochodzenie bytu w zapisie */
+  roomIndex: number;
+  /** komórki świata, środek komórki */
+  x: number;
+  y: number;
+  /** metry: podłoga komory */
+  z: number;
+  /** indeks w `wildCreatures` */
+  kind: number;
+}
+
+/** Żagiew: nieruchome źródło światła zawieszone nad podłogą komory. */
+export interface DungeonLight {
+  roomIndex: number;
+  /** metry świata — od razu w jednostkach `LightRig`, żeby gra nie przeliczała */
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Mieszkańcy całego lochu. Kolejność jest funkcją indeksu komory, nie kolejności
+ * odwiedzania — inaczej ten sam loch dawałby inną obsadę w zależności od tego,
+ * którym wejściem gracz do niego trafił.
+ */
+export function dungeonDwellers(
+  seed: number,
+  graph: DungeonGraph,
+  rules: DwellerRules,
+): DungeonDweller[] {
+  const out: DungeonDweller[] = [];
+  for (let i = 0; i < graph.rooms.length; i++) {
+    const room = graph.rooms[i];
+    if (room === undefined) continue;
+    const rnd = mulberry32(h32(seed ^ 0xd8e1, graph.poiId, i, 1));
+    const bazowa = i === graph.entrance ? rules.entryRoomChance : rules.roomChance;
+    const szansa = bazowa + room.level * rules.perLevel;
+    if (rnd() >= szansa) continue;
+
+    const ilu =
+      rules.packMin +
+      Math.floor(rnd() * (rules.packMax - rules.packMin + 1));
+    for (let n = 0; n < ilu; n++) {
+      // wnętrze komory z marginesem jednej komórki od ściany: byt przyklejony
+      // do ściany wygląda jak wtopiony w nią, a AI i tak zaraz go z niej wyprowadzi
+      const w = Math.max(1, room.w - 2);
+      const h = Math.max(1, room.h - 2);
+      out.push({
+        roomIndex: i,
+        x: room.x + 1 + Math.floor(rnd() * w) + 0.5,
+        y: room.y + 1 + Math.floor(rnd() * h) + 0.5,
+        z: room.floorZ,
+        kind: rules.kind,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Żagwie. Osobny strumień losowy od mieszkańców (inna sól), żeby zmiana liczebności
+ * potworów nie przestawiała świateł — dwa niezależne pokrętła w contencie mają być
+ * naprawdę niezależne.
+ *
+ * Liczba jest celowo mała: loch ma zostać ciemny, a test ciemności z M2 obowiązuje
+ * bez zmiany progów. Żagiew jest wyjątkiem, który tę ciemność podkreśla.
+ */
+export function dungeonLights(
+  seed: number,
+  graph: DungeonGraph,
+  rules: LightRules,
+): DungeonLight[] {
+  const out: DungeonLight[] = [];
+  for (let i = 0; i < graph.rooms.length; i++) {
+    const room = graph.rooms[i];
+    if (room === undefined) continue;
+    const rnd = mulberry32(h32(seed ^ 0x11a7, graph.poiId, i, 2));
+    if (rnd() >= rules.roomChance) continue;
+
+    const ile =
+      rules.perRoomMin +
+      Math.floor(rnd() * (rules.perRoomMax - rules.perRoomMin + 1));
+    for (let n = 0; n < ile; n++) {
+      const w = Math.max(1, room.w - 2);
+      const h = Math.max(1, room.h - 2);
+      const cx = room.x + 1 + Math.floor(rnd() * w) + 0.5;
+      const cy = room.y + 1 + Math.floor(rnd() * h) + 0.5;
+      // wysokość zawieszenia liczona od podłogi, ale nie wyżej niż pod stropem
+      const z = Math.min(room.floorZ + rules.heightM, room.ceilZ - 0.3);
+      out.push({ roomIndex: i, x: cx * CELL_METERS, y: cy * CELL_METERS, z });
+    }
+  }
+  return out;
 }
