@@ -13,15 +13,28 @@ const START_Y = -467.5;
  * Marsz po prostej z prędkością biegu, ze strumieniowaniem chunków jak w grze.
  * Zwraca liczbę bytów w pierścieniu życia w zadanych punktach trasy.
  */
-function marsz(kilometry: readonly number[], kierunek = { dx: 1, dy: 0 }) {
-  const world = new ChunkStore(SEED, wildPack, 3);
+function marsz(
+  kilometry: readonly number[],
+  kierunek = { dx: 1, dy: 0 },
+  /** wywoływane raz, w połowie pierwszego odcinka — miejsce na zabicie kogoś po drodze */
+  wtracenie?: (b: Bestiary) => boolean,
+  /** czy po dojściu do ostatniego punktu wrócić tą samą drogą */
+  powrot = false,
+) {
+  // Pierscien chunkow 1, a nie 3 jak w grze: cykl zycia siega 48 komorek, wiec
+  // chunk pod graczem i jego sasiedzi (64 komorki kazdy) w zupelnosci wystarczaja,
+  // a generacja chunkow jest tu jedynym powaznym kosztem 30-kilometrowego marszu.
+  const world = new ChunkStore(SEED, wildPack, 1);
   world.loadRing({ x: START_X, y: START_Y });
   const b = new Bestiary(SEED, world);
   const wyniki: { km: number; wPierscieniu: number; naLiscie: number }[] = [];
 
   let x = START_X;
   let y = START_Y;
-  const krokKomorek = 4.4 / CELL_METERS; // sekunda biegu
+  // Dwie sekundy biegu na tick. Gra wola `spawnAround` co klatke, ale cykl zycia
+  // patrzy na promien 48 komorek (96 m), a tu przesuwamy sie o 8,8 m — dosc gesto,
+  // zeby zaden klaster nie przeskoczyl pierscienia niezauwazony.
+  const krokKomorek = 8.8 / CELL_METERS;
   let przebyteM = 0;
 
   for (const cel of kilometry) {
@@ -34,6 +47,10 @@ function marsz(kilometry: readonly number[], kierunek = { dx: 1, dy: 0 }) {
       }
       const z = world.surfaceHeight(Math.floor(x), Math.floor(y), 1e6);
       b.spawnAround(x, y, Number.isFinite(z) ? z : 0);
+      // probujemy az do skutku: w polowie trasy pierscien bywa akurat pusty
+      if (wtracenie !== undefined && przebyteM > (cel * 1000) / 2 && wtracenie(b)) {
+        wtracenie = undefined;
+      }
     }
     let wPierscieniu = 0;
     for (const m of b.mobs) {
@@ -41,41 +58,94 @@ function marsz(kilometry: readonly number[], kierunek = { dx: 1, dy: 0 }) {
     }
     wyniki.push({ km: cel, wPierscieniu, naLiscie: b.mobs.length });
   }
-  return { wyniki, bestiary: b, pozycja: { x, y }, world };
+  // Powrót tą samą drogą: notujemy, kogo świat pokazał na drodze powrotnej. To jest
+  // właściwe miejsce na sprawdzenie determinizmu — zwolniony byt musi wrócić ten sam.
+  const naPowrocie = new Set<string>();
+  if (powrot) {
+    while (przebyteM > 0) {
+      x -= kierunek.dx * krokKomorek;
+      y -= kierunek.dy * krokKomorek;
+      przebyteM -= krokKomorek * CELL_METERS;
+      while (world.update({ x, y })) {
+        /* dociągamy chunki */
+      }
+      const z = world.surfaceHeight(Math.floor(x), Math.floor(y), 1e6);
+      b.spawnAround(x, y, Number.isFinite(z) ? z : 0);
+      for (const m of b.mobs) naPowrocie.add(m.origin);
+    }
+  }
+
+  return { wyniki, bestiary: b, pozycja: { x, y }, naPowrocie, world };
 }
 
 describe('cykl życia bytów', () => {
   it('po trzydziestu kilometrach świat rodzi tyle samo, co po jednym', () => {
     // Kryterium odbioru M3e. Przed zmianą: 30 bytów po 1,3 km, sufit 64 po 7,9 km
     // i **zero w pierścieniu** na każdym pomiarze — świat przestawał rodzić byty
-    // wszędzie i na stałe.
-    const { wyniki } = marsz([1, 10, 30]);
-    for (const w of wyniki) {
-      console.log(`${w.km} km: w pierścieniu ${w.wPierscieniu}, na liście ${w.naLiscie}`);
+    // wszędzie i na stałe. Mierzymy z kilku tras, bo jedna trasa może trafić
+    // w pas gór albo w jezioro i pokazać zero z powodu terenu, a nie cyklu życia.
+    const trasy = [
+      { dx: 1, dy: 0 },
+      { dx: 0, dy: 1 },
+      { dx: 0.7071, dy: -0.7071 },
+    ].map((k) => marsz([1, 10, 30], k).wyniki);
+
+    const mediana = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)]!;
+    const medianyWPierscieniu: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const wPierscieniu = trasy.map((t) => t[i]!.wPierscieniu);
+      const naLiscie = trasy.map((t) => t[i]!.naLiscie);
+      console.log(
+        `${trasy[0]![i]!.km} km: w pierścieniu ${wPierscieniu.join('/')} ` +
+          `(mediana ${mediana(wPierscieniu)}), na liście ${naLiscie.join('/')}`,
+      );
+      medianyWPierscieniu.push(mediana(wPierscieniu));
+      // lista nie może rosnąć bez końca: sufit dotyczy okolicy, nie całej partii
+      for (const n of naLiscie) expect(n).toBeLessThanOrEqual(WILD_SPAWN.ringCap * 3);
     }
-    const wPierscieniu = wyniki.map((w) => w.wPierscieniu);
-    const srednia = wPierscieniu.reduce((a, c) => a + c, 0) / wPierscieniu.length;
+
+    const srednia = medianyWPierscieniu.reduce((a, c) => a + c, 0) / 3;
     expect(srednia).toBeGreaterThan(0);
-    for (const n of wPierscieniu) {
+    for (const n of medianyWPierscieniu) {
       // rozjazd większy niż ±40% znaczy, że zadanie nie jest zrobione
       expect(Math.abs(n - srednia) / srednia).toBeLessThan(0.4);
     }
-    // lista nie może rosnąć bez końca: sufit dotyczy okolicy, nie całej partii
-    for (const w of wyniki) expect(w.naLiscie).toBeLessThanOrEqual(WILD_SPAWN.ringCap * 3);
   });
 
-  it('ta sama trasa dwa razy daje ten sam świat', () => {
+  it('ta sama trasa dwa razy daje ten sam świat, trzeci przebieg różni się o jednego zabitego', () => {
     // Zwalnianie i ponowne rodzenie nie może zmieniać zawartości świata: byt
     // nietknięty wraca ten sam, na tej samej pozycji startowej.
-    const a = marsz([2]);
-    const b = marsz([2]);
     const opis = (m: { mobs: { origin: string; being: { x: number; y: number } }[] }) =>
-      m.mobs
-        .map((x) => `${x.origin}@${x.being.x.toFixed(3)},${x.being.y.toFixed(3)}`)
-        .sort()
-        .join('|');
-    expect(opis(a.bestiary)).toBe(opis(b.bestiary));
-    expect(a.bestiary.mobs.length).toBeGreaterThan(0);
+      m.mobs.map((x) => `${x.origin}@${x.being.x.toFixed(3)},${x.being.y.toFixed(3)}`).sort();
+
+    const a = marsz([2], { dx: 1, dy: 0 }, undefined, true);
+    const b = marsz([2], { dx: 1, dy: 0 }, undefined, true);
+    expect(opis(a.bestiary).join('|')).toBe(opis(b.bestiary).join('|'));
+    expect([...a.naPowrocie].sort().join('|')).toBe([...b.naPowrocie].sort().join('|'));
+    expect(a.naPowrocie.size).toBeGreaterThan(0);
+
+    // Trzeci przebieg z jednym zabitym w drodze tam: droga powrotna ma się różnić
+    // dokładnie o tego jednego byta, a nie „gdzieś tam mniej więcej".
+    const c = marsz(
+      [2],
+      { dx: 1, dy: 0 },
+      (bestiary) => {
+        const zywy = bestiary.mobs.find((m) => m.being.actor.stance !== Stance.Dead);
+        if (zywy === undefined) return false;
+        zywy.being.actor.hp = 0;
+        zywy.being.actor.stance = Stance.Dead;
+        return true;
+      },
+      true,
+    );
+    const zabity = c.bestiary.deltasToSave().filter((d) => d.dead);
+    expect(zabity.length).toBe(1);
+    const brakujace = [...a.naPowrocie].filter((o) => !c.naPowrocie.has(o));
+    console.log(
+      `na powrocie: ${a.naPowrocie.size} bytów, po zabiciu jednego ${c.naPowrocie.size}, ` +
+        `różnica: ${brakujace.join(',') || 'brak'}`,
+    );
+    expect(brakujace).toEqual([zabity[0]!.origin]);
   });
 
   it('zabity zostaje zabity, także po odejściu i powrocie', () => {
