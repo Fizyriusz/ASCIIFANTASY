@@ -304,6 +304,7 @@ function snapshot(): GameSave {
       items: pack.items.map((i) => [i.kind, i.index] as [number, number]),
     },
     entities: bestiary.toSave(),
+    entityDeltas: bestiary.deltasToSave(),
   };
 }
 
@@ -380,7 +381,7 @@ function loadGame(): void {
   for (const [kind, index] of p.items) pack.items.push({ kind: kind as 0 | 1, index });
   syncWeight(pack, a);
   dayPhase = (save.clock / (24 * 60)) % 1;
-  bestiary.restore(save.entities);
+  bestiary.restore(save.entities, save.entityDeltas);
   panel = Panel.None;
   land(p.x, p.y, p.yaw);
   cam.pitch = p.pitch;

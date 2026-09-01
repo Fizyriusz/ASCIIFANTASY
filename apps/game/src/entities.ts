@@ -37,14 +37,10 @@ import {
   updateAi,
 } from '@rpg/rules';
 import type { AttackResult, Being, Intent } from '@rpg/rules';
-import type { EntitySave } from '@rpg/world';
+import type { EntityDelta, EntitySave } from '@rpg/world';
 
 /** Bok klastra rozmnażania w komórkach. Mniejszy = gęściej i drożej. */
 const CLUSTER = 16;
-/** Ile klastrów wokół gracza sprawdzamy. 3 przy boku 16 to 96 komórek zasięgu. */
-const CLUSTER_RING = 3;
-/** Górna granica bytów w symulacji; więcej i tak nie zmieści się w kadrze. */
-const MAX_BEINGS = 64;
 /** metry: wysokość oczu bytu nad gruntem, do linii wzroku i do trafień */
 const EYE_M = 1.2;
 
@@ -88,11 +84,17 @@ const frames: SpriteFrames[] = wildCreatures.map((c) =>
 export class Bestiary {
   readonly mobs: Mob[] = [];
   /**
-   * Miejsca już rozpatrzone: klaster powierzchni (`"kx:ky"`) albo komora lochu
-   * (`"poi:komora"`). Bez tego byty odradzają się co klatkę, a po wczytaniu zapisu
-   * — po raz drugi obok tych, które właśnie wróciły z pliku.
+   * Byty **obecne w symulacji**, po pochodzeniu. Zastąpiło zbiór „klastrów już
+   * rozpatrzonych", który rósł monotonicznie i przez to zabijał rozmnażanie:
+   * po dobiciu do sufitu świat przestawał rodzić byty wszędzie i na stałe.
    */
-  private readonly seen = new Set<string>();
+  private readonly live = new Map<string, Mob>();
+  /**
+   * Odstępstwa bytów zwolnionych z symulacji: zabici, ranni, przesunięci. Byt
+   * nietknięty **nie zostawia wpisu** — przy powrocie odtworzy się z hasza taki sam.
+   * To ta sama zasada, co przy świecie: seed plus delty, nigdy dziennik odwiedzin.
+   */
+  private readonly deltas = new Map<string, EntityDelta>();
   private readonly sprites: SpriteInstance[] = [];
   /** żagwie lochu, w którym gracz się znajduje; puste na powierzchni */
   private lights: readonly DungeonLight[] = [];
@@ -107,14 +109,18 @@ export class Bestiary {
   ) {}
 
   /**
-   * Dorzuca byty z klastrów wokół gracza. Wywoływane co klatkę, ale kosztuje
-   * cokolwiek tylko przy wejściu w nowy klaster — reszta to `Set.has`.
+   * Dorzuca byty z klastrów wokół gracza i zwalnia te, które odeszły. Wywoływane
+   * co klatkę; koszt typowej klatki to przemiatanie pierścienia klastrów haszem
+   * i `Map.has` na kandydacie, bez czytania gruntu.
    */
   spawnAround(px: number, py: number, pz: number): void {
+    // Najpierw zwalniamy to, co odeszło za daleko — inaczej sufit pierścienia
+    // liczyłby byty, których gracz dawno nie widzi, i blokował nowe.
+    this.releaseFar(px, py);
+
     // Pod stropem klastry powierzchni nie obowiązują. Bez tego warunku zejście
     // do lochu **zużywa** klastry łąki nad nim: byty stają na trawie, a gracz
-    // pod ziemią nie spotyka nikogo — i już nigdy nie spotka, bo klaster raz
-    // rozpatrzony nie wraca.
+    // pod ziemią nie spotyka nikogo.
     if (this.underground(px, py, pz)) {
       this.populateDungeon(px, py, pz);
       return;
@@ -122,40 +128,121 @@ export class Bestiary {
     this.lights = [];
     this.lochId = -1;
 
+    const ring = Math.ceil(WILD_SPAWN.liveRadiusCells / CLUSTER);
     const cx = Math.floor(px / CLUSTER);
     const cy = Math.floor(py / CLUSTER);
-    for (let dy = -CLUSTER_RING; dy <= CLUSTER_RING; dy++) {
-      for (let dx = -CLUSTER_RING; dx <= CLUSTER_RING; dx++) {
-        const kx = cx + dx;
-        const ky = cy + dy;
-        const key = `${kx}:${ky}`;
-        if (this.seen.has(key)) continue;
-        this.seen.add(key);
-        this.spawnCluster(kx, ky, pz);
+    for (let dy = -ring; dy <= ring; dy++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        this.spawnCluster(cx + dx, cy + dy, px, py);
       }
     }
   }
 
-  private spawnCluster(kx: number, ky: number, pz: number): void {
+  /**
+   * Zwalnia byty poza promieniem. Promień zwolnienia jest większy od promienia
+   * życia (histereza), bo byt na granicy inaczej znikałby i wracał co klatkę.
+   */
+  private releaseFar(px: number, py: number): void {
+    const r2 = WILD_SPAWN.releaseRadiusCells * WILD_SPAWN.releaseRadiusCells;
+    for (let i = this.mobs.length - 1; i >= 0; i--) {
+      const m = this.mobs[i]!;
+      const dx = m.being.x - px;
+      const dy = m.being.y - py;
+      if (dx * dx + dy * dy <= r2) continue;
+      this.release(m);
+      this.mobs.splice(i, 1);
+    }
+  }
+
+  /** Zdejmuje byt z symulacji, zapisując deltę tylko wtedy, gdy jest co zapisać. */
+  private release(m: Mob): void {
+    this.live.delete(m.origin);
+    const b = m.being;
+    const martwy = b.actor.stance === Stance.Dead;
+    const ranny = b.actor.hp < b.actor.maxHp;
+    if (!martwy && !ranny) return; // nietknięty: odtworzy się z hasza
+    this.deltas.set(m.origin, {
+      origin: m.origin,
+      dead: martwy,
+      hp: b.actor.hp,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      yaw: b.yaw,
+    });
+  }
+
+  /** Ile bytów jest w pierścieniu życia — sufit dotyczy okolicy, nie całej partii. */
+  private inRing(px: number, py: number): number {
+    const r2 = WILD_SPAWN.liveRadiusCells * WILD_SPAWN.liveRadiusCells;
+    let n = 0;
+    for (const m of this.mobs) {
+      const dx = m.being.x - px;
+      const dy = m.being.y - py;
+      if (dx * dx + dy * dy <= r2) n++;
+    }
+    return n;
+  }
+
+  /**
+   * Wstawia byt, jeśli wolno: nie ma go jeszcze w symulacji, nie zginął wcześniej
+   * i pierścień nie jest pełny. Delta rannego wraca razem z nim.
+   */
+  private instantiate(
+    origin: string,
+    x: number,
+    y: number,
+    z: number,
+    yaw: number,
+    px: number,
+    py: number,
+  ): boolean {
+    if (this.live.has(origin)) return false;
+    const delta = this.deltas.get(origin);
+    if (delta !== undefined && delta.dead) return false;
+    if (this.inRing(px, py) >= WILD_SPAWN.ringCap) return false;
+
+    const m = delta === undefined
+      ? this.makeGoblin(x, y, z, yaw, origin)
+      : this.makeGoblin(delta.x, delta.y, delta.z, delta.yaw, origin);
+    if (delta !== undefined) m.being.actor.hp = delta.hp;
+    this.mobs.push(m);
+    this.live.set(origin, m);
+    return true;
+  }
+
+  private spawnCluster(kx: number, ky: number, px: number, py: number): void {
     const h = h32(this.seed ^ 0x60b1, kx, ky, 0) >>> 0;
     // Gęstość i rozmiar grupy są w contencie, bo to liczby balansu: groźba ma
     // wychodzić z liczebności, a nie z siły pojedynczego przeciwnika.
     if (h % WILD_SPAWN.oneInClusters !== 0) return;
     const rozpietosc = WILD_SPAWN.packMax - WILD_SPAWN.packMin + 1;
     const count = WILD_SPAWN.packMin + ((h >>> 8) % rozpietosc);
+    const r2 = WILD_SPAWN.liveRadiusCells * WILD_SPAWN.liveRadiusCells;
+
     for (let i = 0; i < count; i++) {
-      if (this.mobs.length >= MAX_BEINGS) return;
       const hp = h32(h, i, 0, 0) >>> 0;
+      const origin = `${kx}:${ky}#${i}`;
+      // Byt już żywy sprawdzamy **przed** czytaniem gruntu: to jest przypadek
+      // typowy (klaster pod nogami gracza wraca co klatkę), a `surfaceHeight`
+      // jest tu najdroższą operacją w całej pętli.
+      if (this.live.has(origin)) continue;
       const x = kx * CLUSTER + (hp % CLUSTER) + 0.5;
       const y = ky * CLUSTER + ((hp >>> 8) % CLUSTER) + 0.5;
-      // Pułap szukania gruntu to wysokość gracza plus trzy metry, a nie
-      // nieskończoność: pod ziemią „najwyższa czapka" to strop nad jaskinią,
-      // więc bez tego wszystkie gobliny lądują na łące nad lochem.
-      const z = this.world.surfaceHeight(Math.floor(x), Math.floor(y), pz + 3);
+      // poza pierścieniem życia byt nie istnieje — nie ma po co liczyć jego gruntu
+      const dx = x - px;
+      const dy = y - py;
+      if (dx * dx + dy * dy > r2) continue;
+
+      // Grunt czytamy **z komórki kandydata**, bez pułapu liczonego od gracza.
+      // Pułap wszedł w M3, żeby byty nie lądowały na łące nad lochem — ale od M3d
+      // podziemia mają własną ścieżkę, a na powierzchni pułap odrzucał każdego,
+      // kto stał wyżej niż trzy metry nad graczem, i klaster przepadał na zawsze.
+      const z = this.world.surfaceHeight(Math.floor(x), Math.floor(y), 1e6);
       if (!Number.isFinite(z)) continue;
       // nie stawiamy nikogo tam, gdzie nie zmieści się jego własna sylwetka
       if (this.world.blocks(Math.floor(x), Math.floor(y), z + 0.1, z + 1.6)) continue;
-      this.mobs.push(this.makeGoblin(x, y, z, ((hp >>> 16) % 628) / 100, `${kx}:${ky}`));
+      this.instantiate(origin, x, y, z, ((hp >>> 16) % 628) / 100, px, py);
     }
   }
 
@@ -183,15 +270,16 @@ export class Bestiary {
         this.usedLights = new Uint8Array(this.lights.length);
       }
     }
-    for (const d of dungeonDwellers(this.seed, graf, DUNGEON_SPAWN)) {
-      if (this.mobs.length >= MAX_BEINGS) return;
-      const key = `${graf.poiId}:${d.roomIndex}:${d.x}:${d.y}`;
-      if (this.seen.has(key)) continue;
-      this.seen.add(key);
+    const mieszkancy = dungeonDwellers(this.seed, graf, DUNGEON_SPAWN);
+    for (let i = 0; i < mieszkancy.length; i++) {
+      const d = mieszkancy[i]!;
       const z = this.world.surfaceHeight(Math.floor(d.x), Math.floor(d.y), d.z + 2);
       if (!Number.isFinite(z)) continue;
       if (this.world.blocks(Math.floor(d.x), Math.floor(d.y), z + 0.1, z + 1.6)) continue;
-      this.mobs.push(this.makeGoblin(d.x, d.y, z, 0, `${graf.poiId}:${d.roomIndex}`));
+      // Pochodzenie niesie **indeks mieszkańca**, nie samą komorę: bez tego trzy
+      // gobliny z jednej komory dzieliłyby jedną deltę i zabicie jednego znaczyłoby
+      // zabicie wszystkich.
+      this.instantiate(`${graf.poiId}:${d.roomIndex}#${i}`, d.x, d.y, z, 0, px, py);
     }
   }
 
@@ -434,9 +522,12 @@ export class Bestiary {
    * klastra, zostawia go nieoznaczonym i wtedy klaster odradza się przy wczytaniu.
    * To jest znany dług, opisany w §10.6 architektury.
    */
-  restore(list: readonly EntitySave[]): void {
+  restore(list: readonly EntitySave[], deltas: readonly EntityDelta[]): void {
     this.mobs.length = 0;
+    this.live.clear();
+    this.deltas.clear();
     this.lochId = -1;
+    for (const d of deltas) this.deltas.set(d.origin, d);
     for (const e of list) {
       const m = this.makeGoblin(e.x, e.y, e.z, e.yaw, e.origin);
       m.being.actor.hp = e.hp;
@@ -445,8 +536,13 @@ export class Bestiary {
       this.mobs.push(m);
       // Pochodzenie idzie z zapisu, a nie z pozycji: byt, który wyszedł ze swojej
       // komory za graczem, inaczej odrodziłby ją po wczytaniu (dług 10.6).
-      if (e.origin !== '') this.seen.add(e.origin);
+      if (e.origin !== '') this.live.set(e.origin, m);
     }
+  }
+
+  /** Delty do zapisu: wszystko, co gracz zmienił w bytach już zwolnionych. */
+  deltasToSave(): EntityDelta[] {
+    return [...this.deltas.values()];
   }
 
   /**
