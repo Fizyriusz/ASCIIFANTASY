@@ -42,7 +42,9 @@ function gracz(): Being {
   const a = makeActor(PLAYER.hp, PLAYER.stamina, PLAYER.attrs, PLAYER.skills);
   equipWeapon(a, Weapon.Shortsword);
   equipArmor(a, Armor.Leather);
-  const b = makeBeing(a, 32, 32, 0, 0, -1, 1.9, 4.4);
+  // bryła gracza jak w grze: od M3f wysokość i wysokość barków decydują o oknie
+  // celowania, więc symulacja z domyślnym humanoidem mierzyłaby inną walkę
+  const b = makeBeing(a, 32, 32, 0, 0, -1, 1.9, 4.4, 1.85, 1.7);
   b.lum = 0.9;
   return b;
 }
@@ -53,7 +55,18 @@ function goblin(x: number, y: number, patrzyNa: { x: number; y: number }): { bei
   // Zwrócony w stronę gracza: to jest spotkanie, a nie zasadzka od tyłu. Byt
   // odwrócony plecami nigdy nie zauważy skradającego się gracza i starcie
   // w ogóle się nie zacznie — sprawdza to osobny test percepcji.
-  const b = makeBeing(a, x, y, 0, Math.atan2(patrzyNa.y - y, patrzyNa.x - x), 0, def!.walkMps, def!.runMps);
+  const b = makeBeing(
+    a,
+    x,
+    y,
+    0,
+    Math.atan2(patrzyNa.y - y, patrzyNa.x - x),
+    0,
+    def!.walkMps,
+    def!.runMps,
+    def!.heightM,
+    def!.heightM * 0.85,
+  );
   b.lum = 0.8;
   return { being: b, intent: makeIntent() };
 }
@@ -101,6 +114,13 @@ function starcie(seed: number, ilu: number, styl: Styl): { wygrana: boolean; hp:
 
     // --- decyzje gracza ---
     p.yaw = Math.atan2(najblizszy.y - p.y, najblizszy.x - p.x);
+    // Od M3f pion decyduje o trafieniu, więc symulowany gracz musi **celować**,
+    // a nie patrzeć w horyzont. Bez tej linii miara balansu opisywała kogoś, kto
+    // macha mieczem nad głową goblina: trójka wygrywała 100% starć zamiast 59%.
+    p.pitch = Math.atan2(
+      najblizszy.z + najblizszy.heightM * 0.5 - (p.z + p.eyeM),
+      Math.max(0.1, bestD),
+    );
     const wZasiegu = bestD < 2.2;
     if (p.actor.stance === Stance.Idle) {
       if (p.actor.exhausted) {

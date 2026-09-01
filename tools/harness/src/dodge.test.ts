@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { COMBAT, PLAYER, wildPack } from '@rpg/content';
+import { COMBAT, PLAYER, Weapon, weapons, wildCreatures, wildPack } from '@rpg/content';
 import { CELL_METERS, ChunkStore, dungeonsNear } from '@rpg/world';
 import type { DungeonGraph } from '@rpg/world';
-import { Stance, beginDodge, makeActor, tickActor } from '@rpg/rules';
+import { Stance, beginDodge, equipWeapon, makeActor, reachOf, makeBeing, tickActor } from '@rpg/rules';
 import { dodgeSpeed, tryStep } from '../../../apps/game/src/move.js';
 
 const SEED = 4242;
@@ -45,6 +45,13 @@ function unik(
   return { x, y, dystansM: Math.hypot(x - start.x, y - start.y) * CELL_METERS };
 }
 
+/** Zasięg rozstrzygania ciosu dla danej broni — ta sama definicja, której używa walka. */
+function zasieg(bron: number): number {
+  const a = makeActor(20, 60, PLAYER.attrs, PLAYER.skills);
+  equipWeapon(a, bron);
+  return reachOf(makeBeing(a, 0, 0, 0, 0, -1, 1, 1));
+}
+
 function najblizszyLoch(): DungeonGraph {
   const graphs = dungeonsNear(SEED, START_X - 1024, START_Y - 1024, START_X + 1024, START_Y + 1024);
   let best: DungeonGraph | null = null;
@@ -83,6 +90,31 @@ describe('unik jest ruchem, nie znaczkiem', () => {
     }
   });
 
+  it('wyprowadza poza zasięg typowej broni', () => {
+    // Dystans uniku jest **wyprowadzony z zasięgu**, nie z gustu: ma wyjść poza
+    // rozstrzyganie ciosu maczugi (2,0 m) i sztyletu (1,7 m), licząc od dystansu,
+    // na którym trzyma się AI w zwarciu (1,8 m).
+    const zasiegMaczugi = zasieg(wildCreatures[0]!.weapon!);
+    const zasiegSztyletu = zasieg(Weapon.Dagger);
+    const dystansPoUniku = 1.8 + COMBAT.dodgeDistanceM;
+
+    expect(dystansPoUniku).toBeGreaterThan(zasiegMaczugi * 1.5);
+    expect(dystansPoUniku).toBeGreaterThan(zasiegSztyletu * 1.5);
+    // ...ale nie tak daleko, żeby unik zamieniał się w ucieczkę
+    expect(COMBAT.dodgeDistanceM).toBeLessThan(zasiegMaczugi * 1.5);
+  });
+
+  it('szarpnięcie mieści się w tempie, które da się odczytać', () => {
+    // Przy 2,2 m i oknie 260 ms szczyt wychodził 16,9 m/s i 27 cm przeskoku na
+    // klatkę — to czyta się jak teleport, nie uskok. Okno jest po to, żeby ten sam
+    // dystans rozłożyć na czas; profil zostaje malejący.
+    const szczyt = dodgeSpeed(COMBAT.dodgeWindowMs, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM);
+    const krokNaKlatke = (szczyt * 16) / 1000;
+    expect(szczyt).toBeGreaterThan(4.4); // szybciej niż bieg, inaczej to nie unik
+    expect(szczyt).toBeLessThan(11); // ale nie tak, żeby świat przeskakiwał
+    expect(krokNaKlatke).toBeLessThan(0.2);
+  });
+
   it('unik w ścianę nie przesuwa i nie przenika', () => {
     // Przesunięcie „bo to tylko efekt" jest najprostszym sposobem na wyjście gracza
     // za geometrię. Ta sama kolizja co przy kroku znaczy: w ścianę się nie da.
@@ -112,6 +144,75 @@ describe('unik jest ruchem, nie znaczkiem', () => {
     expect(world.blocks(Math.floor(r.x), Math.floor(r.y), z + 0.1, z + CIALO.heightM)).toBe(false);
   });
 
+  it('w wąskim korytarzu unik też zatrzymuje się na ścianie', () => {
+    // Komora ma zapas miejsca, korytarz nie ma go wcale — a przy dystansie
+    // przekraczającym szerokość przejścia to właśnie tu najłatwiej wyjść za geometrię.
+    const g = najblizszyLoch();
+    const world = new ChunkStore(SEED, wildPack, 3);
+    const kor = g.corridors.find((c) => !c.stairs) ?? g.corridors[0]!;
+    const sx = Math.round((kor.x0 + kor.x1) / 2);
+    const sy = Math.round((kor.y0 + kor.y1) / 2);
+    world.loadRing({ x: sx, y: sy });
+    const z = kor.floorZ;
+
+    // szerokość przejścia w poprzek: liczymy wolne komórki w obie strony
+    let wolneX = 0;
+    for (let d = -3; d <= 3; d++) {
+      if (!world.blocks(sx + d, sy, z + 0.1, z + CIALO.heightM)) wolneX++;
+    }
+    let wolneY = 0;
+    for (let d = -3; d <= 3; d++) {
+      if (!world.blocks(sx, sy + d, z + 0.1, z + CIALO.heightM)) wolneY++;
+    }
+    // unik robimy w poprzek korytarza, czyli w tę oś, która jest węższa
+    const wPoprzek = wolneX <= wolneY ? { dx: -1, dy: 0 } : { dx: 0, dy: -1 };
+    console.log(
+      `korytarz (${sx}, ${sy}): wolnych komórek w osi X ${wolneX}, w osi Y ${wolneY} ` +
+        `(komórka to ${CELL_METERS} m, więc przejście ma ${Math.min(wolneX, wolneY) * CELL_METERS} m szerokości)`,
+    );
+    expect(Math.min(wolneX, wolneY)).toBeLessThan(7); // to naprawdę jest przejście
+
+    // Stajemy **przy samej ścianie** korytarza i uskakujemy w nią. Środek przejścia
+    // nie jest testem: komórka ma dwa metry, więc trzykomórkowy korytarz ma sześć
+    // metrów szerokości i unik mieści się w nim w całości — co samo w sobie jest
+    // dobrą wiadomością i dlatego jest w logu powyżej.
+    let x = sx + 0.5;
+    let y = sy + 0.5;
+    while (!world.blocks(Math.floor(x + wPoprzek.dx), Math.floor(y + wPoprzek.dy), z + 0.1, z + CIALO.heightM)) {
+      x += wPoprzek.dx;
+      y += wPoprzek.dy;
+    }
+    // ...i to przy samej jej krawędzi, nie na środku ostatniej wolnej komórki:
+    // kolizja jest komórkowa, więc ze środka komórki zostaje jeszcze metr luzu
+    if (wPoprzek.dx !== 0) x = Math.floor(x) + 0.05;
+    else y = Math.floor(y) + 0.05;
+
+    const r = unik(world, { x, y, z }, wPoprzek);
+    // ściana zatrzymuje unik niemal od razu...
+    expect(r.dystansM).toBeLessThan(0.3);
+    // ...i nie zostawia gracza w skale
+    expect(world.blocks(Math.floor(r.x), Math.floor(r.y), z + 0.1, z + CIALO.heightM)).toBe(false);
+  });
+
+  it('kilka uników z rzędu wyczerpuje pulę, bo unik jest wart więcej niż cios', () => {
+    // Unik wyprowadzający z walki ma kosztować więcej niż zamach: przy sztylecie
+    // (7% puli) i mieczu (13%) unik to 24%, czyli cztery uniki na pełnym pasku.
+    const a = makeActor(PLAYER.hp, PLAYER.stamina, PLAYER.attrs, PLAYER.skills);
+    let uniki = 0;
+    while (beginDodge(a)) {
+      uniki++;
+      a.stance = Stance.Idle; // pomijamy odbicie: liczymy sam koszt wytrzymałości
+      a.dodgeMs = 0;
+    }
+    console.log(
+      `uników z pełnej puli: ${uniki} (koszt ${((COMBAT.dodgeStamina / PLAYER.stamina) * 100).toFixed(0)}% puli, ` +
+        `cios mieczem ${((weapons[Weapon.Shortsword]!.stamina / PLAYER.stamina) * 100).toFixed(0)}%)`,
+    );
+    expect(uniki).toBeGreaterThanOrEqual(3);
+    expect(uniki).toBeLessThanOrEqual(5);
+    expect(COMBAT.dodgeStamina).toBeGreaterThan(weapons[Weapon.Shortsword]!.stamina);
+  });
+
   it('profil prędkości daje zadany dystans, niezależnie od kroku czasowego', () => {
     // Całka po oknie ma dać dokładnie `dodgeDistanceM` — inaczej dystans zależałby
     // od liczby klatek, czyli od maszyny gracza.
@@ -132,6 +233,6 @@ describe('unik jest ruchem, nie znaczkiem', () => {
     expect(start).toBeGreaterThan(polowa);
     expect(polowa).toBeGreaterThan(koniec);
     // szarpnięcie ma być wyraźnie szybsze od biegu, inaczej nie czyta się jako unik
-    expect(start).toBeGreaterThan(5);
+    expect(start).toBeGreaterThan(4.4);
   });
 });
