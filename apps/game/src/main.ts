@@ -233,6 +233,12 @@ let zrodel = 0;
 let hurtMs = 0;
 /** kierunek trwającego uniku, zapamiętany w chwili jego rozpoczęcia */
 let dodgeDir = { dx: 0, dy: 0 };
+/**
+ * ms: ile zostało z **przesunięcia** uniku. Osobny licznik od `actor.dodgeMs`, bo ten
+ * drugi mierzy okno nietykalności: reguły odpowiadają za to, czy cios mija, a warstwa
+ * gry za to, jak daleko i jak szybko postać się przesuwa.
+ */
+let dodgeMoveLeft = 0;
 /** dziennik zdarzeń walki — dwie–trzy linijki gasnące po sekundzie */
 const events = makeEventLog();
 
@@ -573,6 +579,7 @@ window.addEventListener('keydown', (e) => {
       // kierunek zapamiętujemy w chwili wejścia: unik ma iść tam, dokąd gracz
       // się ruszał, a nie tam, gdzie obróci się w trakcie
       dodgeDir = dodgeDirection();
+      dodgeMoveLeft = COMBAT.dodgeMoveMs;
     } else if (player.actor.stance === Stance.Idle) {
       note('brak wytrzymałości na unik', EventKind.Bad);
     }
@@ -726,12 +733,12 @@ function dodgeDirection(): { dx: number; dy: number } {
  * po przeszkodzie tak samo jak krok.
  */
 function stepDodge(dt: number): void {
-  if (player.actor.stance !== Stance.Dodging || player.actor.dodgeMs <= 0) return;
+  if (dodgeMoveLeft <= 0) return;
   const v =
-    dodgeSpeed(player.actor.dodgeMs, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM) /
-    CELL_METERS;
+    dodgeSpeed(dodgeMoveLeft, COMBAT.dodgeMoveMs, COMBAT.dodgeDistanceM) / CELL_METERS;
   tryMove(cam.x + dodgeDir.dx * v * dt, cam.y);
   tryMove(cam.x, cam.y + dodgeDir.dy * v * dt);
+  dodgeMoveLeft -= dt * 1000;
 }
 
 /**
