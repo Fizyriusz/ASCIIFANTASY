@@ -11,7 +11,7 @@ import {
   DEFAULT_TARGET_COLS,
 } from '@rpg/core';
 import type { Camera } from '@rpg/core';
-import { Armor, FEEDBACK, PLAYER, MOVE, Weapon, wildPack } from '@rpg/content';
+import { Armor, COMBAT, FEEDBACK, PLAYER, MOVE, Weapon, wildPack } from '@rpg/content';
 import {
   CELL_METERS,
   ChunkStore,
@@ -63,6 +63,7 @@ import {
   UI,
 } from '@rpg/ui';
 import { Bestiary, aiLabel, animate } from './entities.js';
+import { dodgeSpeed, tryStep } from './move.js';
 import type { MobReport } from './entities.js';
 
 /**
@@ -230,6 +231,8 @@ const mobReport: MobReport = {
 let zrodel = 0;
 /** ms: ile jeszcze trwa reakcja kadru na oberwanie (przyciemnienie + drganie) */
 let hurtMs = 0;
+/** kierunek trwającego uniku, zapamiętany w chwili jego rozpoczęcia */
+let dodgeDir = { dx: 0, dy: 0 };
 /** dziennik zdarzeń walki — dwie–trzy linijki gasnące po sekundzie */
 const events = makeEventLog();
 
@@ -565,8 +568,14 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     importSave();
   }
-  if (e.code === 'Space' && !beginDodge(player.actor) && player.actor.stance === Stance.Idle) {
-    note('brak wytrzymałości na unik', EventKind.Bad);
+  if (e.code === 'Space') {
+    if (beginDodge(player.actor)) {
+      // kierunek zapamiętujemy w chwili wejścia: unik ma iść tam, dokąd gracz
+      // się ruszał, a nie tam, gdzie obróci się w trakcie
+      dodgeDir = dodgeDirection();
+    } else if (player.actor.stance === Stance.Idle) {
+      note('brak wytrzymałości na unik', EventKind.Bad);
+    }
   }
 });
 
@@ -677,21 +686,52 @@ window.addEventListener('resize', resize);
  * Próba przesunięcia na nową pozycję. Kolizja jest celowo prymitywna — próg,
  * ściana i głębina; reszta to zakres późniejszych zadań.
  */
+const CIALO = { heightM: PLAYER_HEIGHT, stepUpM: STEP_UP, wadeM: WADE_DEPTH };
+
 function tryMove(nx: number, ny: number): void {
   // Ciała są nieprzenikalne. Bez tego gracz wchodził w potwora (zmierzone 0,00 m
   // dystansu), a odsuwający się byt wyglądał, jakby dawał się przepychać.
-  if (bestiary.occupied(nx, ny, MOVE.bodyRadiusM * 2)) return;
-  const cx = Math.floor(nx);
-  const cy = Math.floor(ny);
-  const feet = eyeTarget - PLAYER_EYE;
-  const surf = world.surfaceHeight(cx, cy, feet + STEP_UP);
-  if (!Number.isFinite(surf)) return; // chunk jeszcze się nie policzył
-  if (world.blocks(cx, cy, surf + 0.05, surf + PLAYER_HEIGHT)) return;
-  const water = world.waterLevel(cx, cy);
-  if (water !== null && water - surf > WADE_DEPTH) return;
-  cam.x = nx;
-  cam.y = ny;
-  eyeTarget = surf + PLAYER_EYE;
+  const krok = tryStep(world, eyeTarget - PLAYER_EYE, nx, ny, CIALO, (x, y) =>
+    bestiary.occupied(x, y, MOVE.bodyRadiusM * 2),
+  );
+  if (krok === null) return;
+  cam.x = krok.x;
+  cam.y = krok.y;
+  eyeTarget = krok.surfZ + PLAYER_EYE;
+}
+
+/**
+ * Kierunek uniku, w komórkach świata. Bierze się z klawiszy ruchu — bok albo tył —
+ * a bez klawisza jest **w tył**: unik ma odsuwać od tego, na co patrzysz.
+ */
+function dodgeDirection(): { dx: number; dy: number } {
+  const dirX = Math.cos(cam.yaw);
+  const dirY = Math.sin(cam.yaw);
+  let fwd = 0;
+  let strafe = 0;
+  if (keys['KeyW'] || keys['ArrowUp']) fwd += 1;
+  if (keys['KeyS'] || keys['ArrowDown']) fwd -= 1;
+  if (keys['KeyD']) strafe += 1;
+  if (keys['KeyA']) strafe -= 1;
+  if (fwd === 0 && strafe === 0) fwd = -1;
+  const x = dirX * fwd - dirY * strafe;
+  const y = dirY * fwd + dirX * strafe;
+  const len = Math.hypot(x, y) || 1;
+  return { dx: x / len, dy: y / len };
+}
+
+/**
+ * Przesunięcie uniku. Idzie przez **tę samą kolizję co chodzenie** (`tryMove`), więc
+ * unik w ścianę nie działa, zamiast przenikać — a osobno w X i Y, żeby ześlizgiwał się
+ * po przeszkodzie tak samo jak krok.
+ */
+function stepDodge(dt: number): void {
+  if (player.actor.stance !== Stance.Dodging || player.actor.dodgeMs <= 0) return;
+  const v =
+    dodgeSpeed(player.actor.dodgeMs, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM) /
+    CELL_METERS;
+  tryMove(cam.x + dodgeDir.dx * v * dt, cam.y);
+  tryMove(cam.x, cam.y + dodgeDir.dy * v * dt);
 }
 
 /**
@@ -749,7 +789,10 @@ function frame(t: number): void {
 
   const dtMs = dt * 1000;
   const zyje = player.actor.stance !== Stance.Dead;
-  if (panel === Panel.None && zyje) step(dt);
+  if (panel === Panel.None && zyje) {
+    step(dt);
+    stepDodge(dt);
+  }
   if (dt > 0) {
     const k = dt * EYE_SMOOTH;
     cam.eyeZ += (eyeTarget - cam.eyeZ) * (k > 1 ? 1 : k);
