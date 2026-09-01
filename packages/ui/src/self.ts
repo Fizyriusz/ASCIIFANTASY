@@ -21,7 +21,11 @@ export interface SelfView {
   /** 0..1 — postęp zamachu; poniżej zera broń jest poza kadrem */
   windup: number;
   blocking: boolean;
-  /** 0..1 — ile zostało z okna uniku */
+  /**
+   * 0..1 — ile zostało z okna uniku. Nie rysuje niczego: **unik jest ruchem**, a nie
+   * znakiem, i widać go po tym, że świat jedzie w drugą stronę. Pole zostaje, bo gra
+   * potrzebuje tej wartości do prędkości przesunięcia.
+   */
   dodge: number;
   /** 0..1 — jasność w miejscu gracza; broń jest oświetlona jak reszta kadru */
   lum: number;
@@ -38,7 +42,6 @@ const DREWNO = { r: 150, g: 120, b: 80 } as const;
  * bezbronność, a nie jak druga faza animacji.
  */
 export function drawSelf(s: Screen, v: SelfView): void {
-  if (v.dodge > 0) drawDodge(s, v);
   if (v.blocking) drawBlock(s, v);
   else if (v.windup >= 0) drawWeapon(s, v);
 }
@@ -83,25 +86,6 @@ function drawBlock(s: Screen, v: SelfView): void {
   s.put(x1, y, 93, kolor); // ']'
   for (let x = x0 + 2; x < x1 - 2; x += 6) {
     s.put(x, y + 1, 124, kolor); // '|' — nity gardy, żeby zasłona nie była kreską
-  }
-}
-
-/**
- * Unik: **impuls**, nie stan. Krótki, asymetryczny znacznik przy jednej krawędzi —
- * przechył. Musi mieć część **lokalną**, bo globalny przechył całego kadru zmienia
- * każdą komórkę i przeszedłby każdy test „różni się o N komórek", nie mierząc niczego.
- */
-function drawDodge(s: Screen, v: SelfView): void {
-  const kolor = shade(STAL.r, STAL.g, STAL.b, v.lum * v.dodge);
-  if (kolor === 0) return;
-  const wys = Math.max(4, Math.round(s.rows * 0.4 * v.dodge));
-  const x = (s.cols * 0.12) | 0;
-  for (let i = 0; i < wys; i++) {
-    const y = s.rows - 3 - i;
-    // pas ukośny, trzy znaki grubości: ma być widoczny kątem oka, a nie szukany
-    s.put(x + i, y, 47, kolor); // '/'
-    s.put(x + i + 1, y, 47, kolor);
-    s.put(x + i + 2, y, 39, kolor); // '''
   }
 }
 
