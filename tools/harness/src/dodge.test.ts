@@ -26,9 +26,12 @@ function unik(
   let x = start.x;
   let y = start.y;
   let feet = start.z;
+  // własny licznik przesunięcia, dokładnie jak w grze: `actor.dodgeMs` mierzy okno
+  // nietykalności, a ruch ma swój czas
+  let ruchMs = COMBAT.dodgeMoveMs;
 
-  while (a.stance === Stance.Dodging && a.dodgeMs > 0) {
-    const v = dodgeSpeed(a.dodgeMs, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM) / CELL_METERS;
+  while (ruchMs > 0) {
+    const v = dodgeSpeed(ruchMs, COMBAT.dodgeMoveMs, COMBAT.dodgeDistanceM) / CELL_METERS;
     const dt = DT / 1000;
     const kx = tryStep(world, feet, x + dir.dx * v * dt, y, CIALO);
     if (kx !== null) {
@@ -41,6 +44,7 @@ function unik(
       feet = ky.surfZ;
     }
     tickActor(a, DT);
+    ruchMs -= DT;
   }
   return { x, y, dystansM: Math.hypot(x - start.x, y - start.y) * CELL_METERS };
 }
@@ -108,7 +112,7 @@ describe('unik jest ruchem, nie znaczkiem', () => {
     // Przy 2,2 m i oknie 260 ms szczyt wychodził 16,9 m/s i 27 cm przeskoku na
     // klatkę — to czyta się jak teleport, nie uskok. Okno jest po to, żeby ten sam
     // dystans rozłożyć na czas; profil zostaje malejący.
-    const szczyt = dodgeSpeed(COMBAT.dodgeWindowMs, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM);
+    const szczyt = dodgeSpeed(COMBAT.dodgeMoveMs, COMBAT.dodgeMoveMs, COMBAT.dodgeDistanceM);
     const krokNaKlatke = (szczyt * 16) / 1000;
     expect(szczyt).toBeGreaterThan(4.4); // szybciej niż bieg, inaczej to nie unik
     expect(szczyt).toBeLessThan(11); // ale nie tak, żeby świat przeskakiwał
@@ -194,6 +198,18 @@ describe('unik jest ruchem, nie znaczkiem', () => {
     expect(world.blocks(Math.floor(r.x), Math.floor(r.y), z + 0.1, z + CIALO.heightM)).toBe(false);
   });
 
+  it('czas ruchu i czas nietykalności to dwa osobne regulatory', () => {
+    // Rozdzielone, choć dziś mają tę samą wartość: okno nietykalności zmienia tempo
+    // walki (mediana 10 000 starć poszła z 5,2 na 6,5 s przy jego wydłużeniu),
+    // a czas ruchu zmienia wyłącznie to, jak unik wygląda.
+    expect(COMBAT.dodgeMoveMs).toBeGreaterThan(0);
+    expect(COMBAT.dodgeWindowMs).toBeGreaterThan(0);
+    // skrócenie samego ruchu podnosi szczyt prędkości i nie rusza obrony
+    const szybciej = dodgeSpeed(200, 200, COMBAT.dodgeDistanceM);
+    const wolniej = dodgeSpeed(600, 600, COMBAT.dodgeDistanceM);
+    expect(szybciej).toBeGreaterThan(wolniej);
+  });
+
   it('kilka uników z rzędu wyczerpuje pulę, bo unik jest wart więcej niż cios', () => {
     // Unik wyprowadzający z walki ma kosztować więcej niż zamach: przy sztylecie
     // (7% puli) i mieczu (13%) unik to 24%, czyli cztery uniki na pełnym pasku.
@@ -218,8 +234,8 @@ describe('unik jest ruchem, nie znaczkiem', () => {
     // od liczby klatek, czyli od maszyny gracza.
     for (const krok of [8, 16, 33]) {
       let s = 0;
-      for (let pozostalo = COMBAT.dodgeWindowMs; pozostalo > 0; pozostalo -= krok) {
-        s += (dodgeSpeed(pozostalo, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM) * krok) / 1000;
+      for (let pozostalo = COMBAT.dodgeMoveMs; pozostalo > 0; pozostalo -= krok) {
+        s += (dodgeSpeed(pozostalo, COMBAT.dodgeMoveMs, COMBAT.dodgeDistanceM) * krok) / 1000;
       }
       expect(s).toBeGreaterThan(COMBAT.dodgeDistanceM * 0.85);
       expect(s).toBeLessThan(COMBAT.dodgeDistanceM * 1.15);
@@ -227,9 +243,9 @@ describe('unik jest ruchem, nie znaczkiem', () => {
   });
 
   it('unik zaczyna się szarpnięciem, a kończy wyhamowaniem', () => {
-    const start = dodgeSpeed(COMBAT.dodgeWindowMs, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM);
-    const polowa = dodgeSpeed(COMBAT.dodgeWindowMs / 2, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM);
-    const koniec = dodgeSpeed(0, COMBAT.dodgeWindowMs, COMBAT.dodgeDistanceM);
+    const start = dodgeSpeed(COMBAT.dodgeMoveMs, COMBAT.dodgeMoveMs, COMBAT.dodgeDistanceM);
+    const polowa = dodgeSpeed(COMBAT.dodgeMoveMs / 2, COMBAT.dodgeMoveMs, COMBAT.dodgeDistanceM);
+    const koniec = dodgeSpeed(0, COMBAT.dodgeMoveMs, COMBAT.dodgeDistanceM);
     expect(start).toBeGreaterThan(polowa);
     expect(polowa).toBeGreaterThan(koniec);
     // szarpnięcie ma być wyraźnie szybsze od biegu, inaczej nie czyta się jako unik
