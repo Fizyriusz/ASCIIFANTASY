@@ -80,8 +80,10 @@ function playFor(hours: number, perHour = 60): GameSave {
     save.clock += 60;
     if (h % 10 === 0) save.flags[`quest${h}`] = 1;
   }
-  // delty bytow: zabici i ranni, ktorych gracz zostawil po drodze
-  for (let i = 0; i < 120; i++) {
+  // Delty bytow: zabici i ranni, ktorych gracz zostawil po drodze. Tempo celowo
+  // pesymistyczne — jedno starcie zakonczone smiercia albo rana na minute gry,
+  // czyli tyle samo wpisow, ile daja delty komorek.
+  for (let i = 0; i < hours * perHour; i++) {
     save.entityDeltas.push({
       origin: `${i % 40}:${i}#${i % 3}`,
       dead: i % 3 === 0,
@@ -130,6 +132,20 @@ describe('format zapisu', () => {
     expect(back!.flags).toEqual(save.flags);
   });
 
+  it('delty bytów wracają: zabity bez pozycji, ranny z pozycją', () => {
+    const save = emptySave();
+    save.entityDeltas.push({ origin: '3:-7#1', dead: true, hp: 0, x: 12.34, y: 5, z: 4, yaw: 1 });
+    save.entityDeltas.push({ origin: '3:-7#2', dead: false, hp: 7, x: 12.345, y: -5.678, z: 4.2, yaw: 2.7182 });
+    const wczytane = parse(serialize(save))!.entityDeltas;
+    expect(wczytane[0]).toEqual({ origin: '3:-7#1', dead: true, hp: 0, x: 0, y: 0, z: 0, yaw: 0 });
+    // pozycja zabitego jest nieistotna i celowo nie wraca — w pliku jej nie ma
+    const ranny = wczytane[1]!;
+    expect(ranny.hp).toBe(7);
+    expect(ranny.x).toBeCloseTo(12.345, 1);
+    expect(ranny.y).toBeCloseTo(-5.678, 1);
+    expect(ranny.yaw).toBeCloseTo(2.7182, 2);
+  });
+
   it('delty komórek wracają co do spanu', () => {
     const save = playFor(6);
     const back = parse(serialize(save))!;
@@ -175,9 +191,15 @@ describe('budżet zapisu', () => {
     const save = playFor(200);
     const bytes = saveSizeBytes(save);
     const delt = Object.keys(save.cellDeltas).length;
+    // Obie liczby osobno, bo rosna z innych powodow: komorki z kopania i budowania,
+    // byty z walki. Ta druga jest nowa od M3e i to ona moze wysadzic budzet.
+    const bezBytow = saveSizeBytes({ ...save, entityDeltas: [] });
     console.log(
-      `200 h: ${delt} delt, ${(bytes / 1024).toFixed(0)} kB ` +
-        `(${(bytes / delt).toFixed(1)} B na deltę)`,
+      `200 h: ${delt} delt komórek (${(bezBytow / 1024).toFixed(0)} kB), ` +
+        `${save.entityDeltas.length} delt bytów ` +
+        `(${((bytes - bezBytow) / 1024).toFixed(0)} kB, ` +
+        `${((bytes - bezBytow) / save.entityDeltas.length).toFixed(1)} B na deltę), ` +
+        `razem ${(bytes / 1024).toFixed(0)} kB`,
     );
     expect(bytes).toBeLessThan(2 * 1024 * 1024);
   });
@@ -195,6 +217,7 @@ describe('budżet zapisu', () => {
       f: save.flags,
       p: save.player,
       e: save.entities,
+      ed: save.entityDeltas,
     }).length;
     console.log(
       `krotki ${(krotki / 1024).toFixed(0)} kB, obiekty ${(obiekty / 1024).toFixed(0)} kB`,
