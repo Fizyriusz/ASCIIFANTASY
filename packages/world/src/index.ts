@@ -58,4 +58,4 @@ export {
   clearStorage,
   saveSizeBytes,
 } from './save.js';
-export type { GameSave, PlayerSave, EntitySave, StorageLike } from './save.js';
+export type { GameSave, PlayerSave, EntitySave, EntityDelta, StorageLike } from './save.js';

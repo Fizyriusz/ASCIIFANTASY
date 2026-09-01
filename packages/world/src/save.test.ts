@@ -48,6 +48,7 @@ function emptySave(): GameSave {
       ],
     },
     entities: [],
+    entityDeltas: [],
   };
 }
 
@@ -78,6 +79,18 @@ function playFor(hours: number, perHour = 60): GameSave {
     }
     save.clock += 60;
     if (h % 10 === 0) save.flags[`quest${h}`] = 1;
+  }
+  // delty bytow: zabici i ranni, ktorych gracz zostawil po drodze
+  for (let i = 0; i < 120; i++) {
+    save.entityDeltas.push({
+      origin: `${i % 40}:${i}#${i % 3}`,
+      dead: i % 3 === 0,
+      hp: i % 3 === 0 ? 0 : 1 + (i % 13),
+      x: rnd() * 1000,
+      y: rnd() * 1000,
+      z: 4,
+      yaw: rnd() * 6.28,
+    });
   }
   for (let i = 0; i < 40; i++) {
     save.entities.push({

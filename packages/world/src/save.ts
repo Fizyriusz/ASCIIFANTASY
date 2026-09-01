@@ -17,7 +17,7 @@ import { MAX_SPANS_PER_CELL } from './grid.js';
 import type { Cell, DeltaKey, SaveFile, Span } from './types.js';
 
 /** Podbijamy przy każdej niezgodnej zmianie formatu. Stare zapisy odrzucamy wprost. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /** Span w postaci krotki — tak leży w pliku zapisu. */
 type SpanTuple = [number, number, number, number, number];
@@ -71,9 +71,32 @@ export interface EntitySave {
   origin: string;
 }
 
+/**
+ * Co gracz zmienił w bycie, którego już nie ma w symulacji. Byty powstają z seeda,
+ * więc zapisujemy **wyłącznie odstępstwa**: zabity zostaje zabity, ranny wraca ranny,
+ * a byt nietknięty nie zostawia śladu i przy powrocie odtworzy się identyczny.
+ *
+ * To jest ta sama zasada, co przy świecie (seed plus delty komórek) — i ten sam
+ * powód: dziennik wszystkich minięć rósłby bez ograniczeń wraz ze zwiedzonym terenem.
+ */
+export interface EntityDelta {
+  /** pochodzenie bytu: `"kx:ky#i"` na powierzchni, `"poi:komora#i"` w lochu */
+  origin: string;
+  dead: boolean;
+  hp: number;
+  /** pozycja w chwili zwolnienia; przy `dead` nieistotna */
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+}
+
 export interface GameSave extends SaveFile {
   player: PlayerSave;
+  /** byty **żywe w chwili zapisu** — te, które akurat są w pierścieniu wokół gracza */
   entities: EntitySave[];
+  /** odstępstwa bytów zwolnionych z symulacji */
+  entityDeltas: EntityDelta[];
 }
 
 /** Minimalny kontrakt `localStorage` — dzięki niemu testy nie potrzebują DOM-u. */
@@ -92,6 +115,8 @@ interface Wire {
   f: [string, number][];
   p: PlayerSave;
   e: EntitySave[];
+  /** delty bytów — krótka nazwa, bo tego jest najwięcej po długiej grze */
+  ed: EntityDelta[];
 }
 
 export function serialize(save: GameSave): string {
@@ -119,6 +144,7 @@ export function serialize(save: GameSave): string {
     f,
     p: save.player,
     e: save.entities,
+    ed: save.entityDeltas,
   };
   return JSON.stringify(wire);
 }
@@ -169,6 +195,15 @@ export function parse(text: string): GameSave | null {
     entities.push({ ...(e as EntitySave), origin: (e as EntitySave).origin ?? '' });
   }
 
+  const entityDeltas: EntityDelta[] = [];
+  if (Array.isArray(w.ed)) {
+    for (const e of w.ed) {
+      if (typeof e === 'object' && e !== null && typeof (e as EntityDelta).origin === 'string') {
+        entityDeltas.push(e as EntityDelta);
+      }
+    }
+  }
+
   return {
     version: SAVE_VERSION,
     seed: w.seed,
@@ -177,6 +212,7 @@ export function parse(text: string): GameSave | null {
     flags,
     player: w.p,
     entities,
+    entityDeltas,
   };
 }
 
