@@ -12,6 +12,7 @@ export type {
 } from './types.js';
 export { SpanGrid, MAX_SPANS_PER_CELL } from './grid.js';
 export { buildNeonCity } from './packs/neon.js';
+export type { NeonMats } from './packs/neon.js';
 export { SEA_LEVEL, terrainHeight, terrainSlope, slopeFrom } from './terrain.js';
 export { riverSegments, waterLevelAt, carveHeight, waterAt, clearRiverCache } from './hydro.js';
 export type { RiverSegment } from './hydro.js';
@@ -41,6 +42,8 @@ export type {
   DungeonVoid,
   DungeonDweller,
   DungeonLight,
+  DwellerRules,
+  LightRules,
 } from './dungeon.js';
 export { dungeonDwellers, dungeonLights } from './dungeon.js';
 export { structureAt, structuresNear, structureAtCell, StructurePart } from './structure.js';

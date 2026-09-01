@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DUNGEON_LIGHT } from '@rpg/content';
+import { DUNGEON_LIGHT, DUNGEON_SPAWN } from '@rpg/content';
 import { CELL_METERS } from './types.js';
 import { dungeonDwellers, dungeonLights, dungeonsNear } from './dungeon.js';
 import type { DungeonGraph } from './dungeon.js';
@@ -23,27 +23,27 @@ describe('zawartość lochu', () => {
   it('jest czystą funkcją seeda i grafu', () => {
     const g = lochy(1)[0];
     expect(g).toBeDefined();
-    const wzorzec = JSON.stringify(dungeonDwellers(SEED, g!));
+    const wzorzec = JSON.stringify(dungeonDwellers(SEED, g!, DUNGEON_SPAWN));
     for (let i = 0; i < 1000; i++) {
-      expect(JSON.stringify(dungeonDwellers(SEED, g!))).toBe(wzorzec);
+      expect(JSON.stringify(dungeonDwellers(SEED, g!, DUNGEON_SPAWN))).toBe(wzorzec);
     }
     // inny seed to inna obsada — inaczej „deterministyczne" znaczyłoby „stałe"
-    expect(JSON.stringify(dungeonDwellers(SEED + 1, g!))).not.toBe(wzorzec);
+    expect(JSON.stringify(dungeonDwellers(SEED + 1, g!, DUNGEON_SPAWN))).not.toBe(wzorzec);
   });
 
   it('światła mają własny strumień losowy, niezależny od mieszkańców', () => {
     // Dwa pokrętła w contencie mają być naprawdę niezależne: zmiana liczebności
     // potworów nie może przestawiać żagwi.
     const g = lochy(1)[0]!;
-    const a = JSON.stringify(dungeonLights(SEED, g));
-    for (let i = 0; i < 100; i++) expect(JSON.stringify(dungeonLights(SEED, g))).toBe(a);
-    expect(a).not.toBe(JSON.stringify(dungeonDwellers(SEED, g)));
+    const a = JSON.stringify(dungeonLights(SEED, g, DUNGEON_LIGHT));
+    for (let i = 0; i < 100; i++) expect(JSON.stringify(dungeonLights(SEED, g, DUNGEON_LIGHT))).toBe(a);
+    expect(a).not.toBe(JSON.stringify(dungeonDwellers(SEED, g, DUNGEON_SPAWN)));
   });
 
   it('pusty loch jest rzadkością, nie regułą', () => {
     const próbka = lochy();
     expect(próbka.length).toBeGreaterThan(20);
-    const liczby = próbka.map((g) => dungeonDwellers(SEED, g).length).sort((a, b) => a - b);
+    const liczby = próbka.map((g) => dungeonDwellers(SEED, g, DUNGEON_SPAWN).length).sort((a, b) => a - b);
     const puste = liczby.filter((n) => n === 0).length;
     const mediana = liczby[liczby.length >> 1] ?? 0;
     console.log(
@@ -61,7 +61,7 @@ describe('zawartość lochu', () => {
     let zŻagwią = 0;
     const naLoch: number[] = [];
     for (const g of próbka) {
-      const l = dungeonLights(SEED, g);
+      const l = dungeonLights(SEED, g, DUNGEON_LIGHT);
       naLoch.push(l.length);
       komór += g.rooms.length;
       zŻagwią += new Set(l.map((x) => x.roomIndex)).size;
@@ -79,7 +79,7 @@ describe('zawartość lochu', () => {
 
   it('każdy mieszkaniec stoi we wnętrzu swojej komory, na jej podłodze', () => {
     for (const g of lochy()) {
-      for (const d of dungeonDwellers(SEED, g)) {
+      for (const d of dungeonDwellers(SEED, g, DUNGEON_SPAWN)) {
         const r = g.rooms[d.roomIndex];
         expect(r).toBeDefined();
         expect(d.x).toBeGreaterThan(r!.x);
@@ -93,7 +93,7 @@ describe('zawartość lochu', () => {
 
   it('żagiew wisi pod stropem, a nie w nim', () => {
     for (const g of lochy()) {
-      for (const l of dungeonLights(SEED, g)) {
+      for (const l of dungeonLights(SEED, g, DUNGEON_LIGHT)) {
         const r = g.rooms[l.roomIndex]!;
         expect(l.z).toBeGreaterThan(r.floorZ);
         expect(l.z).toBeLessThan(r.ceilZ);
@@ -111,7 +111,7 @@ describe('zawartość lochu', () => {
     let innychZamieszkanych = 0;
     let innych = 0;
     for (const g of lochy()) {
-      const zajete = new Set(dungeonDwellers(SEED, g).map((d) => d.roomIndex));
+      const zajete = new Set(dungeonDwellers(SEED, g, DUNGEON_SPAWN).map((d) => d.roomIndex));
       for (let i = 0; i < g.rooms.length; i++) {
         if (i === g.entrance) {
           wejsciowych++;

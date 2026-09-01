@@ -2,7 +2,16 @@ import { bench, describe } from 'vitest';
 import { Screen } from './screen.js';
 import { blit } from './blit.js';
 import { pack15 } from './color.js';
-import { rnd01 } from '@rpg/world';
+/**
+ * Własny generator zamiast `rnd01` z `@rpg/world`: `packages/core` nie importuje
+ * niczego z warstw powyżej, także w benchu. Import „tylko do pomiaru" jest tą samą
+ * zależnością — i to on zwykle zostaje.
+ */
+function rnd01(x: number, y: number, z: number): number {
+  let h = (x * 374761393 + y * 668265263 + z * 2246822519) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
 
 /**
  * Budżet: blit sceny referencyjnej (150x48) musi zmieścić się z zapasem w klatce.
@@ -22,7 +31,7 @@ function referenceScreen(): Screen {
   for (let r = 0; r < s.rows; r++) {
     for (let c = 0; c < s.cols; c++) {
       const band = Math.floor(c / 7); // symuluje fasady: serie tego samego koloru
-      const lum = 0.3 + 0.7 * rnd01(band, r, 1, 0);
+      const lum = 0.3 + 0.7 * rnd01(band, r, 1);
       s.putUnsafe(c, r, 0x23, pack15(40 * lum, 220 * lum, 255 * lum));
     }
   }
