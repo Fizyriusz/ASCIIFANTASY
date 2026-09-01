@@ -111,20 +111,73 @@ interface SaveFile {
 
 Zapis po 200 h gry powinien mieć < 2 MB. Jeśli rośnie szybciej — coś zapisujemy niepotrzebnie.
 
-**Stan po M3d** (`packages/world/src/save.ts`, `SAVE_VERSION = 2`). Działa: seed, zegar,
-pełny stan gracza z plecakiem, delty komórek, byty **z pochodzeniem** i flagi. Nie ma jeszcze frakcji ani questów — wejdą
+**Stan po M3e** (`packages/world/src/save.ts`, `SAVE_VERSION = 3`). Działa: seed, zegar,
+pełny stan gracza z plecakiem, delty komórek, byty żywe w chwili zapisu, **delty bytów
+zwolnionych** (§2.3a) i flagi. Nie ma jeszcze frakcji ani questów — wejdą
 z M4 i M5, jako kolejne pola i podbicie `SAVE_VERSION`.
 
 Format na dysku jest **krotkowy**: span leży jako `[bottom, top, mat, capMat, flags]`,
-a delty jako lista par, nie obiekt. Powód jest zmierzony: przy 11 990 deltach
-z syntetycznych 200 godzin gry wychodzi **483 kB zamiast 1319 kB**, czyli 41 bajtów
-na deltę zamiast 113. Nazwy pól powtórzone przy każdym spanie kosztują tu więcej
-niż same liczby.
+delty komórek jako lista par, delta bytu jako `[pochodzenie]` albo
+`[pochodzenie, hp, x, y, z, yaw]`. Powód jest zmierzony na 200 godzinach syntetycznej
+gry: **832 kB w krotkach zamiast 2697 kB w obiektach**. Sama zamiana delt bytów
+z obiektów na krotki to 29,7 B zamiast 117,5 B na wpis — przy 12 000 wpisów różnica
+między 832 kB a 1861 kB, czyli między zapasem a jego brakiem w limicie 2 MB.
+
+Pozycja zabitego bytu nie idzie do pliku wcale, bo jest nieistotna; pozycje rannych
+zaokrąglamy do centymetra, a zwrot do tysięcznej radiana. Rozdzielczość ponad tę nie jest
+widoczna w grze, a w pliku kosztuje kilkanaście bajtów na wpis.
 
 `parse` zwraca `null` zamiast rzucać, a klucz delty o złym kształcie jest pomijany:
 źródłem jest `localStorage` albo plik od gracza, więc może być czymkolwiek. Gra ma
 wtedy zacząć nową partię, a nie się wywalić — i na pewno nie nadpisać przypadkowej
 komórki.
+
+### 2.3a Cykl życia bytów (M3e)
+
+Byt istnieje **tylko w pierścieniu wokół gracza**. Poza nim nie ma go w symulacji — nie
+chodzi sobie dalej, nie je, nie wędruje; wróci, gdy gracz wróci, i będzie taki sam.
+Liczby są w `packages/content` (`WILD_SPAWN`): promień życia 48 komórek, promień
+zwolnienia 72 komórki (histereza, żeby byt na granicy nie migotał), sufit **24 byty
+w pierścieniu**.
+
+Sufit dotyczy pierścienia, nie listy — i to jest cała lekcja z M3d. Poprzedni sufit
+`MAX_BEINGS = 64` liczył całą listę, a że byt raz wstawiony nigdy nie był zwalniany,
+to po ośmiu kilometrach marszu lista dobijała do sufitu i świat przestawał rodzić byty
+**wszędzie i do końca sesji**: pomiar dawał 0 bytów w pierścieniu po 1,3, 7,9 i 31,7 km.
+Drugą połową tego samego błędu był zbiór `seen` rosnący monotonicznie — klaster raz
+rozpatrzony nie wracał do puli, więc powrót w to samo miejsce zastawał pustkę.
+
+Co zostaje po bycie zwolnionym, zależy od tego, czy gracz go dotknął:
+
+| stan bytu | co zostaje |
+|---|---|
+| nietknięty | **nic** — przy powrocie odtworzy się z hasza taki sam |
+| ranny albo przesunięty | delta z hp i pozycją |
+| zabity | delta „to pochodzenie jest puste" — zabity zostaje zabity |
+
+Wariant „nietknięty też zostaje" był rozważony i odrzucony pomiarem: gracz mija setki
+bytów, więc zapisywanie każdego minięcia zamienia zapis w dziennik podróży. Przy 12 000
+delt na 200 h to już 348 kB; przy jednej delcie na każdy widziany byt limit 2 MB padłby
+w kilkanaście godzin gry.
+
+Pochodzenie bytu (`"kx:ky#i"` na powierzchni, `"poi:komora#i"` w lochu) jest **funkcją
+seeda i miejsca**, nigdy kolejności odwiedzin ani licznika instancji. Bez tego powrót
+z drugiej strony dawałby inny świat, a delta trafiałaby w cudze pochodzenie.
+
+Zmierzone (`tools/harness/src/life.test.ts`, `life.bench.ts`):
+
+- bytów w pierścieniu, mediana z trzech tras: **9 po 1 km, 10 po 10 km, 8 po 30 km**
+  (kryterium odbioru: rozjazd poniżej 40%),
+- droga powrotna po 2 km: 90 bytów; po zabiciu jednego 89, różnica dokładnie o to jedno
+  pochodzenie,
+- koszt klatki: **0,027 ms p99** na stojąco, 0,028 ms w biegu (budżet 0,3 ms).
+
+Na powierzchni grunt czytamy **z komórki kandydata**, bez pułapu liczonego od gracza.
+Pułap `pz + 3` wszedł w M3, żeby byty nie lądowały na łące nad lochem, ale od M3d
+podziemia mają własną ścieżkę (§3.3a), a na powierzchni odrzucał każdego kandydata
+wyżej niż trzy metry nad graczem — i klaster przepadał na zawsze, bo był już oznaczony
+jako rozpatrzony. Ryzyko zamienne, czyli byty na niedostępnych półkach skalnych,
+zmierzone: **0 z 25** bytów stoi w komórce, z której nie da się zejść.
 
 ---
 
