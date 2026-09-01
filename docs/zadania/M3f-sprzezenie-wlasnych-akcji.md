@@ -98,18 +98,26 @@ patrząc, a nie licząc.
 - w fazie `Recover` broni **nie ma** w kadrze; odbicie jest karą i ma wyglądać
   jak bezbronność, a nie jak druga faza animacji.
 
-### 2. Blok i unik jako dwie różne rzeczy
+### 2. Blok jako znak, unik jako ruch
 
 - **Blok** trwa tak długo, jak długo gracz go trzyma — więc jego znak jest **stały**
   w kadrze: zasłona przy dolnej krawędzi, wyraźnie inna od wchodzącej broni.
-- **Unik** trwa 260 ms okna i 340 ms odbicia — jest **impulsem**, a nie stanem, więc
-  jego znak ma być krótki i asymetryczny (przechył w jedną stronę), żeby nie mylił się
-  z blokiem ani z zamachem.
+- **Unik przesuwa postać.** Nie dostaje żadnego znacznika: sygnałem jest to, że świat
+  jedzie w drugą stronę. Dziś unik jest oknem nietykalności ze znaczkiem obok — czyli
+  mechaniką schowaną pod symbolem; po zmianie jest ruchem, który widać.
 
-**Uwaga na miarę.** Efekt obejmujący cały kadr (przechył całego obrazu) zmienia każdą
-komórkę, więc kryterium „różni się o 20 komórek" przejdzie trywialnie i nic nie sprawdzi
-— tę pułapkę mieliśmy już przy przyciemnieniu w M3b. Znacznik uniku musi mieć część
-**lokalną**, mierzalną osobno, a globalny przechył jest dodatkiem.
+Zasady uniku:
+
+- przesunięcie o **około metr** w kierunku wynikającym z klawiszy ruchu (bok albo tył);
+  **bez klawisza — w tył**,
+- rozłożone na czas okna uniku, z przyspieszeniem: szarpnięcie na starcie, wyhamowanie
+  na końcu,
+- ruch idzie przez **tę samą kolizję co chodzenie**. Unik w ścianę ma nie działać,
+  a nie przenikać — i to jest osobny punkt do sprawdzenia, bo to najłatwiejsze miejsce
+  na przypadkowe wyjście poza geometrię.
+
+Znacznik uniku z pierwszej wersji tego zlecenia **wypada**. Razem z nim znika pułapka
+miary „efekt globalny przejdzie każdy test różnicy" — bo nie ma już czego rysować.
 
 ### 3. Wszystko w buforze znaków
 
@@ -147,13 +155,14 @@ reagujący opisz w podsumowaniu jako propozycję, razem z tym, jak wyglądałby 
 ## Definicja ukończenia
 
 1. `pnpm typecheck`, `pnpm test`, `pnpm test:snap`, `pnpm bench` — zielone.
-2. Snapshoty: `self-idle`, `self-windup-dagger`, `self-windup-club`, `self-block`,
-   `self-dodge`. **Każda para różni się co najmniej 20 komórkami** — porównywane
-   między sobą, nie tylko ze wzorcem.
+2. Snapshoty: `self-idle`, `self-windup-dagger`, `self-windup-club`, `self-block`.
+   **Każda para różni się co najmniej 20 komórkami** — porównywane między sobą,
+   nie tylko ze wzorcem. Unik snapshotu nie ma, bo nie rysuje niczego własnego.
 3. Test czasu: broń jest w kadrze przez `windupMs` swojej broni ±1 klatka i znika
    w klatce rozstrzygnięcia. Sprawdzone dla wszystkich trzech broni.
-4. Test lokalności uniku: znacznik uniku różni się od kadru spokojnego także wtedy,
-   gdy globalny przechył jest wyłączony.
+4. **Unik jako ruch**: test, że pozycja gracza po uniku zmieniła się o zadany dystans
+   (±20%) i w zadanym kierunku, oraz że unik w ścianę **nie przesuwa** — ta sama
+   kolizja co przy chodzeniu, żadnego przenikania.
 5. Budżet klatki bez zmian: rysowanie własnych akcji poniżej 0,1 ms.
 6. **Koszt celowania zmierzony:** ile procent ciosów, które trafiają dziś, przestaje
    trafiać po wprowadzeniu reguły — w normalnej walce na płaskim, przy graczu
@@ -192,6 +201,8 @@ reagujący opisz w podsumowaniu jako propozycję, razem z tym, jak wyglądałby 
    wychwyci, ale projektować trzeba od razu z tą różnicą.
 5. **Rysowanie przy otwartym panelu.** Ekwipunek i karta postaci zasłaniają kadr;
    własne akcje nie mają się spod nich wysypywać.
+5a. **Unik omijający kolizję.** Przesunięcie „bo to tylko efekt" jest najprostszym
+   sposobem na wyjście gracza za geometrię — ma iść dokładnie tą samą drogą co krok.
 6. **Okno pionowe liczone od nóg zamiast od bryły.** Sylwetka zajmuje przedział kątów,
    a nie punkt — warunek musi porównywać przedział z przedziałem, inaczej trafienie
    w tors będzie działać, a w głowę nie.

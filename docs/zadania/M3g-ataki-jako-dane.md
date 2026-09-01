@@ -37,6 +37,28 @@ To jest kryterium akceptacji dla każdego nowego ataku, także tych dodanych w p
 
 ---
 
+## Rozstrzygnięcie: kierunek cięcia jest automatyczny
+
+**Nie robimy walki kierunkowej w stylu Mount & Blade.** To jest inny, dużo większy
+projekt i inna gra — osobne wejście na każdy kierunek zmienia całą pętlę walki,
+a razem z nią naukę gry, interfejs i AI.
+
+Kierunek cięcia **wynika z sytuacji**, nie z osobnego przycisku:
+
+- **cięcie w bok** — jeden cel w zasięgu,
+- **cięcie szerokie** — kilka celów w łuku,
+- **pchnięcie** — cel na granicy zasięgu.
+
+Animacja niesie informację o tym, co robi postać, ale **nie dokłada graczowi klawiszy**.
+To jest ta sama zasada, co przy telegrafie z M3b: obraz ma mówić, co się dzieje,
+a nie żądać dodatkowej decyzji.
+
+Powód, dla którego to jest tutaj, a nie w M3f: broń wjeżdżająca w kadr od dołu i znikająca
+wygląda jak unoszący się przedmiot, bo nim jest — nie ma łuku ani kierunku. Kształt ruchu
+per archetyp rozwiązuje to razem z resztą tego zlecenia.
+
+---
+
 ## Zakres
 
 ### Wolno dotykać

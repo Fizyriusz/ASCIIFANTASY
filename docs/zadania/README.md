@@ -14,6 +14,7 @@ nie ma zielonych testów i grywalnego buildu.
 | M2c | [Górny front: bryła wisząca to nie sufit](M2c-gorny-front.md) — **przed M3** | zrobione | sprite’y, które nie znikają |
 | M3 | [Postacie, walka, ekwipunek, zapis](M3-postacie-walka-zapis.md) | zrobione, czeka na odbiór | rozgrywkę |
 | M3b | [Czytelność walki](M3b-czytelnosc-walki.md) | zrobione, odebrane | walkę, którą da się czytać |
+| M3g | [Ataki jako dane](M3g-ataki-jako-dane.md) | do zrobienia — **po M3e** | kształt ruchu broni, łuki i pchnięcia |
 | M3c | [Bryła stworzeń](M3c-bryla-stworzen.md) | do zrobienia, na końcu | czworonogi i pająki |
 | M3d | [Zawartość lochu: mieszkańcy i światło](M3d-zawartosc-lochu.md) | zrobione, odebrane | loch, który jest miejscem |
 | M3f | [Sprzężenie własnych akcji i celowanie](M3f-sprzezenie-wlasnych-akcji.md) | zrobione, czeka na odbiór | walkę, w której widać siebie |
