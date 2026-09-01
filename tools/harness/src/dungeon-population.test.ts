@@ -53,7 +53,8 @@ describe('zaludnienie lochu w grze', () => {
     // kondygnacjach — porównanie z podłogą jednej komory byłoby błędem testu.
     const podlogi = g.rooms.map((r) => r.floorZ);
     for (const m of b.mobs) {
-      expect(m.origin).toMatch(/^\d+:\d+$/);
+      // pochodzenie niesie POI, komorę i indeks mieszkańca (M3e: delty są per byt)
+      expect(m.origin).toMatch(/^\d+:\d+#\d+$/);
       expect(podlogi.some((z) => Math.abs(z - m.being.z) < 1.5)).toBe(true);
     }
   });
@@ -148,6 +149,11 @@ describe('pomiar: czy powierzchnia się wyludnia', () => {
     }
     for (const k of kroki) console.log(k);
     expect(kroki.length).toBe(3);
+    // Po M3e żaden z pomiarów nie może być zerem: to ten sam pomiar, który pokazał
+    // śmierć rozmnażania po dobiciu do sufitu, i zostaje jako świadek.
+    for (const k of kroki) {
+      expect(Number(k.split('komórek ')[1]?.split(',')[0])).toBeGreaterThan(0);
+    }
   });
 
   it('dlaczego: ile klastrów odrzuca warunek gruntu pod pułapem gracza', () => {
