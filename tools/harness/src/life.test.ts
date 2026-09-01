@@ -228,6 +228,35 @@ describe('cykl życia bytów', () => {
     expect(udzial).toBeLessThan(0.1);
   });
 
+  it('wczytanie zapisu nie mnoży bytów ani nie wskrzesza zabitych', () => {
+    const world = new ChunkStore(SEED, wildPack, 1);
+    world.loadRing({ x: START_X, y: START_Y });
+    const b = new Bestiary(SEED, world);
+    const z = world.surfaceHeight(Math.floor(START_X), Math.floor(START_Y), 1e6);
+    b.spawnAround(START_X, START_Y, z);
+
+    // jeden zabity na miejscu, jeden zabity i zostawiony za plecami
+    const zabity = b.mobs[0]!;
+    zabity.being.actor.hp = 0;
+    zabity.being.actor.stance = Stance.Dead;
+    const daleko = START_X + WILD_SPAWN.releaseRadiusCells + 20;
+    b.spawnAround(daleko, START_Y, z);
+    b.spawnAround(START_X, START_Y, z);
+
+    const zapisane = b.toSave();
+    const delty = b.deltasToSave();
+    const ile = b.mobs.length;
+
+    const po = new Bestiary(SEED, world);
+    po.restore(zapisane, delty);
+    po.spawnAround(START_X, START_Y, z);
+    expect(po.mobs.length).toBe(ile);
+    expect(po.mobs.filter((m) => m.origin === zabity.origin).length).toBeLessThanOrEqual(1);
+    for (const m of po.mobs) {
+      if (m.origin === zabity.origin) expect(m.being.actor.stance).toBe(Stance.Dead);
+    }
+  });
+
   it('sufit dotyczy pierścienia, a nie całej partii', () => {
     // Po dobiciu do sufitu świat ma nadal rodzić byty gdzie indziej — to jest
     // różnica między „tłok w okolicy" a „koniec rozmnażania".

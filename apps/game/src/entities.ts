@@ -514,13 +514,12 @@ export class Bestiary {
   }
 
   /**
-   * Przywraca byty z zapisu i **oznacza ich klastry jako rozpatrzone**. Bez tego
-   * kroku pierwsze `spawnAround` po wczytaniu dorzuciłoby drugi komplet goblinów
-   * do tych, które właśnie wróciły z pliku — łącznie z tymi, które gracz zabił.
+   * Przywraca byty z zapisu: żywe wprost, zwolnione jako delty. Pochodzenie każdego
+   * wraca do rejestru żywych, bo bez tego pierwsze `spawnAround` po wczytaniu
+   * dorzuciłoby drugi komplet goblinów do tych, które właśnie wróciły z pliku.
    *
-   * Klaster odtwarzamy z pozycji bytu, a nie z zapisu: byt, który odbiegł od swojego
-   * klastra, zostawia go nieoznaczonym i wtedy klaster odradza się przy wczytaniu.
-   * To jest znany dług, opisany w §10.6 architektury.
+   * Kolejność ma znaczenie: delty wchodzą **przed** bytami żywymi, żeby zabity
+   * z pliku nie mógł zostać odtworzony jako żywy przez pomyłkę w danych.
    */
   restore(list: readonly EntitySave[], deltas: readonly EntityDelta[]): void {
     this.mobs.length = 0;
