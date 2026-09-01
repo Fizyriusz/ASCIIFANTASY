@@ -44,12 +44,22 @@ export const COMBAT = {
   /** ile obrony dokłada unik trafiony w oknie czasowym */
   defDodgeWindow: 0.45,
   /**
-   * ms: jak długo trwa okno uniku po naciśnięciu — i zarazem czas, na który rozłożone
-   * jest przesunięcie. Wydłużone z 260 ms, bo przy dystansie 2,2 m krótkie okno dawało
-   * szczyt 16,9 m/s i 27 cm przeskoku na klatkę: to czyta się jak teleport, nie uskok.
-   * Przy 480 ms szczyt spada do 9,2 m/s (dwa razy prędkość biegu) i 15 cm na klatkę.
+   * ms: jak długo unik daje premię do obrony. **To jest regulator balansu** — okno
+   * nietykalności, w którym cios przeciwnika mija.
    */
   dodgeWindowMs: 480,
+  /**
+   * ms: jak długo trwa samo **przesunięcie**. To jest regulator czytelności, nie
+   * balansu: ten sam dystans rozłożony na krótszy czas daje wyższy szczyt prędkości
+   * i większy przeskok na klatkę. Przy 2,2 m i 260 ms wychodziło 16,9 m/s i 27 cm
+   * na klatkę, co czyta się jak teleport; przy 480 ms jest 9,2 m/s i 15 cm.
+   *
+   * Obie stałe mają dziś tę samą wartość i taka była poprzednio jedna wspólna — ale
+   * są rozdzielone celowo, bo odpowiadają na dwa różne pytania. Wydłużenie okna
+   * nietykalności zmienia tempo walki (mediana 10 000 starć poszła z 5,2 na 6,5 s),
+   * wydłużenie czasu ruchu nie zmienia nic poza tym, jak unik wygląda.
+   */
+  dodgeMoveMs: 480,
   /**
    * metry: o ile unik **przesuwa** postać. Unik nie jest oknem nietykalności ze znaczkiem
    * obok, tylko ruchem — sygnałem dla gracza jest to, że świat jedzie w drugą stronę,
