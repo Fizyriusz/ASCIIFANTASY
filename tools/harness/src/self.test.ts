@@ -10,13 +10,13 @@ const MPC = 2;
 const def = wildCreatures[0]!;
 const art = compileSprite(def.art, { r: def.r, g: def.g, b: def.b }, def.heightM, def.widthM);
 
-type Postawa = 'idle' | 'windup-dagger' | 'windup-club' | 'block' | 'dodge';
+type Postawa = 'idle' | 'windup-dagger' | 'windup-club' | 'block';
 
 /**
  * Kadr walki z własną akcją: świat, przeciwnik w zwarciu, własna broń, celownik.
  * Ta sama kolejność rysowania co w grze.
  */
-function kadr(postawa: Postawa, przechylUniku = true): Screen {
+function kadr(postawa: Postawa): Screen {
   const s = dungeonScene('torch');
   const v = DUNGEON_VIEWS.torch;
   const screen = referenceScreen();
@@ -46,7 +46,8 @@ function kadr(postawa: Postawa, przechylUniku = true): Screen {
   drawSelf(screen, {
     windup: postawa === 'windup-dagger' || postawa === 'windup-club' ? 0.75 : -1,
     blocking: postawa === 'block',
-    dodge: postawa === 'dodge' && przechylUniku ? 0.8 : 0,
+    // unik nie rysuje niczego: jest ruchem, a nie znakiem — patrz `dodge.test.ts`
+    dodge: 0,
     lum: 0.9,
     weapon: bron,
   });
@@ -63,9 +64,9 @@ function roznica(a: Screen, b: Screen): number {
 }
 
 describe('własne akcje w kadrze', () => {
-  const postawy: Postawa[] = ['idle', 'windup-dagger', 'windup-club', 'block', 'dodge'];
+  const postawy: Postawa[] = ['idle', 'windup-dagger', 'windup-club', 'block'];
 
-  it('snapshoty pięciu postaw', () => {
+  it('snapshoty czterech postaw', () => {
     for (const p of postawy) assertSnapshot(`self-${p}`, kadr(p).toText());
   });
 
@@ -79,16 +80,6 @@ describe('własne akcje w kadrze', () => {
         expect(n).toBeGreaterThan(20);
       }
     }
-  });
-
-  it('znacznik uniku ma część lokalną, nie tylko przechył kadru', () => {
-    // Efekt globalny zmienia każdą komórkę i przeszedłby test „różni się" nic nie
-    // mierząc — tę pułapkę mieliśmy już przy przyciemnieniu w M3b.
-    const spokoj = kadr('idle');
-    const unikBezPrzechylu = kadr('dodge', true);
-    expect(roznica(spokoj, unikBezPrzechylu)).toBeGreaterThan(20);
-    // ...i jest to różnica lokalna: mniej niż jedna piąta kadru
-    expect(roznica(spokoj, unikBezPrzechylu)).toBeLessThan(spokoj.chars.length / 5);
   });
 
   it('broń jest w kadrze przez czas zamachu swojej broni i znika w odbiciu', () => {
@@ -106,7 +97,7 @@ describe('własne akcje w kadrze', () => {
     expect(po100ms(sztylet)).toBeGreaterThan(po100ms(maczuga));
   });
 
-  it('okno uniku przekłada się na siłę znacznika', () => {
+  it('okno uniku przelicza się na postęp — używa go ruch, nie rysunek', () => {
     expect(dodgeProgress(COMBAT.dodgeWindowMs)).toBe(1);
     expect(dodgeProgress(COMBAT.dodgeWindowMs / 2)).toBeCloseTo(0.5, 5);
     expect(dodgeProgress(0)).toBe(0);
