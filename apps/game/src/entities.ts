@@ -14,7 +14,15 @@
 
 import { addSource, clearSources, compileSprite, lightAt } from '@rpg/core';
 import type { LightRig, SpriteFrames, SpriteInstance } from '@rpg/core';
-import { FEEDBACK, Frame, WILD_SPAWN, wildCreatures, wildPack } from '@rpg/content';
+import {
+  DUNGEON_LIGHT,
+  DUNGEON_SPAWN,
+  FEEDBACK,
+  Frame,
+  WILD_SPAWN,
+  wildCreatures,
+  wildPack,
+} from '@rpg/content';
 import { CELL_METERS, dungeonDwellers, dungeonLights, dungeonsNear, h32 } from '@rpg/world';
 import type { ChunkStore, DungeonGraph, DungeonLight } from '@rpg/world';
 import {
@@ -170,12 +178,12 @@ export class Bestiary {
     if (graf === null) return;
     if (graf.poiId !== this.lochId) {
       this.lochId = graf.poiId;
-      this.lights = dungeonLights(this.seed, graf);
+      this.lights = dungeonLights(this.seed, graf, DUNGEON_LIGHT);
       if (this.lights.length > this.usedLights.length) {
         this.usedLights = new Uint8Array(this.lights.length);
       }
     }
-    for (const d of dungeonDwellers(this.seed, graf)) {
+    for (const d of dungeonDwellers(this.seed, graf, DUNGEON_SPAWN)) {
       if (this.mobs.length >= MAX_BEINGS) return;
       const key = `${graf.poiId}:${d.roomIndex}:${d.x}:${d.y}`;
       if (this.seen.has(key)) continue;

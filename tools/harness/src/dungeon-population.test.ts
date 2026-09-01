@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { clearSources, createLightRig, renderWorld } from '@rpg/core';
-import { WILD_SPAWN, wildPack } from '@rpg/content';
+import { DUNGEON_LIGHT, DUNGEON_SPAWN, WILD_SPAWN, wildPack } from '@rpg/content';
 import { CELL_METERS, ChunkStore, dungeonDwellers, dungeonLights, dungeonsNear, h32 } from '@rpg/world';
 import type { DungeonGraph } from '@rpg/world';
 import { Bestiary } from '../../../apps/game/src/entities.js';
@@ -61,7 +61,7 @@ describe('zaludnienie lochu w grze', () => {
   it('nikt nie stoi w skale', () => {
     const g = najblizszyLoch();
     const w = store(g.mouthX, g.mouthY);
-    for (const d of dungeonDwellers(SEED, g)) {
+    for (const d of dungeonDwellers(SEED, g, DUNGEON_SPAWN)) {
       const z = w.surfaceHeight(Math.floor(d.x), Math.floor(d.y), d.z + 2);
       if (!Number.isFinite(z)) continue; // odrzucone przez warstwę gry
       expect(w.blocks(Math.floor(d.x), Math.floor(d.y), z + 0.1, z + 1.6)).toBe(false);
@@ -195,7 +195,7 @@ describe('żagiew widać w kadrze', () => {
     // luminancja pilnuje, że w ogóle świeci. Bez tej drugiej miary snapshot
     // przeszedłby także wtedy, gdyby żagiew nie dawała nic.
     const g = najblizszyLoch();
-    const swiatla = dungeonLights(SEED, g);
+    const swiatla = dungeonLights(SEED, g, DUNGEON_LIGHT);
     expect(swiatla.length).toBeGreaterThan(0);
     const l = swiatla[0]!;
     const pokoj = g.rooms[l.roomIndex]!;
