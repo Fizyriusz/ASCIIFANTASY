@@ -45,6 +45,13 @@ export const COMBAT = {
   defDodgeWindow: 0.45,
   /** ms: jak długo trwa okno uniku po naciśnięciu */
   dodgeWindowMs: 260,
+  /**
+   * metry: o ile unik **przesuwa** postać. Unik nie jest oknem nietykalności ze znaczkiem
+   * obok, tylko ruchem — sygnałem dla gracza jest to, że świat jedzie w drugą stronę,
+   * a nie symbol przy krawędzi kadru. Metr przy oknie 260 ms daje szarpnięcie
+   * wyraźnie szybsze od biegu i wyhamowanie w miejscu.
+   */
+  dodgeDistanceM: 1,
   /** ms: ile trwa bezradność po uniku — unik nie jest darmowy */
   dodgeRecoverMs: 340,
   /** wytrzymałość za unik */
