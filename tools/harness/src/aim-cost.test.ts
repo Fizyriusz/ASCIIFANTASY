@@ -106,7 +106,7 @@ function pomiar(styl: 'w cel' | 'przed siebie', rozrzutStopni: number, margines:
   }
   const strata = ciosy === 0 ? 0 : (100 * (ciosy - doszly)) / ciosy;
   console.log(
-    `margines ${(margines * 180 / Math.PI).toFixed(0)}°, styl „${styl}" (rozrzut ±${rozrzutStopni}°): ` +
+    `margines ${margines.toFixed(2)} m, styl „${styl}" (rozrzut ±${rozrzutStopni}°): ` +
       `ciosów ${ciosy}, doszło ${doszly}, poza pionem ${pozaPionem}, poza łukiem ${pozaLukiem}, ` +
       `poza zasięgiem ${pozaZasiegiem} → strata ${strata.toFixed(0)}%`,
   );
@@ -117,20 +117,21 @@ describe('koszt reguły celowania', () => {
   it('gracz celujący w przeciwnika nie traci ciosów', () => {
     // DoD 6 zlecenia M3f: powyżej 20% strat margines byłby za wąski. Mierzymy
     // ścieżką gry — `Bestiary.step` plus ta sama kolizja ciał co przy ruchu gracza.
-    console.log(`margines w contencie: ${((COMBAT.aimMarginRad * 180) / Math.PI).toFixed(0)}°`);
+    console.log(`margines w contencie: ${COMBAT.aimMarginM.toFixed(2)} m nad głową i pod stopami`);
     for (const rozrzut of [0, 5, 10, 20]) {
-      const strata = pomiar('w cel', rozrzut, COMBAT.aimMarginRad);
+      const strata = pomiar('w cel', rozrzut, COMBAT.aimMarginM);
       expect(strata).not.toBeNull();
       expect(strata!).toBeLessThan(20);
     }
   });
 
-  it('gracz patrzący poziomo przed siebie mija goblina — i to jest cała reguła', () => {
-    // Nie jest to strata „w normalnej walce": przy 2 m czubek głowy goblina jest
-    // 8,5° poniżej poziomu, więc patrzenie przed siebie mija go z definicji.
-    // Ta liczba jest tu po to, żeby było widać, o ile trzeba spuścić wzrok.
-    const strata = pomiar('przed siebie', 0, COMBAT.aimMarginRad);
+  it('gracz patrzący poziomo przed siebie też trafia', () => {
+    // Ten test mierzył wcześniej odwrotność i przechodził: strata 100%, bo margines
+    // był kątem, a goblin (1,4 m) stoi w zwarciu pod horyzontem oka (1,7 m).
+    // Liczba była prawdziwa, założenie fałszywe — gracz w zwarciu patrzy przed siebie,
+    // a nie pod nogi. Po zmianie marginesu na metry to jest granica, nie wyjątek.
+    const strata = pomiar('przed siebie', 0, COMBAT.aimMarginM);
     expect(strata).not.toBeNull();
-    expect(strata!).toBeGreaterThan(50);
+    expect(strata!).toBeLessThan(20);
   });
 });

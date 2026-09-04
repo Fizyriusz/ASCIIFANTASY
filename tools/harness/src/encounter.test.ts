@@ -18,7 +18,7 @@ import {
   Swing,
 } from '@rpg/rules';
 import type { AttackResult, Being } from '@rpg/rules';
-import { Bestiary } from '../../../apps/game/src/entities.js';
+import { Bestiary, aiLabel } from '../../../apps/game/src/entities.js';
 import type { Mob, MobReport } from '../../../apps/game/src/entities.js';
 import { DUNGEON_VIEWS, dungeonScene, referenceScreen } from './scene.js';
 
@@ -225,24 +225,32 @@ describe('starcie ścieżką gry', () => {
     expect(przesuniety).toBeLessThan(6);
   });
 
-  it('starcie kończy się czyimś trupem, gdy gracz walczy', () => {
+  it('starcie się rozstrzyga: trup albo ucieczka rannego, nie patowanie', () => {
+    // Test kończył się wcześniej trupem GRACZA, bo jego ciosy nie dochodziły:
+    // byt gracza ma tu pitch 0, a stary margines w stopniach kazał patrzeć w dół,
+    // żeby trafić goblina. Po poprawce gracz wygrywa wymianę, więc rozstrzygnięciem
+    // jest ucieczka rannego przeciwnika — i to też jest koniec starcia.
     const s = ustaw(false);
     expect(s).not.toBeNull();
     const rng = mulberry32(5);
     const out = makeAttackResult();
     let t = 0;
+    const koniec = () =>
+      s!.gracz.actor.stance === Stance.Dead ||
+      s!.cel.being.actor.stance === Stance.Dead ||
+      s!.cel.being.ai === AiState.Fleeing;
     for (; t < 60000; t += DT) {
       krok(s!, rng, out, true);
-      if (s!.gracz.actor.stance === Stance.Dead || s!.cel.being.actor.stance === Stance.Dead) break;
+      if (koniec()) break;
     }
     console.log(
       `starcie ścieżką gry: ${(t / 1000).toFixed(1)} s, gracz ${s!.gracz.actor.hp.toFixed(0)}/45, ` +
-        `goblin ${s!.cel.being.actor.hp.toFixed(0)}/${def.hp}`,
+        `goblin ${s!.cel.being.actor.hp.toFixed(0)}/${def.hp}, ai ${aiLabel(s!.cel.being.ai)}`,
     );
-    expect(
-      s!.gracz.actor.stance === Stance.Dead || s!.cel.being.actor.stance === Stance.Dead,
-    ).toBe(true);
+    expect(koniec()).toBe(true);
     expect(t).toBeLessThan(60000);
+    // rozstrzygnięcie ma być skutkiem ciosów, a nie zbiegu okoliczności
+    expect(s!.cel.being.actor.hp).toBeLessThan(def.hp);
   });
 
   it('trafienie zapala rozbłysk i klatkę Hit w liście sprajtów', () => {

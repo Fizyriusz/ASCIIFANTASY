@@ -73,6 +73,8 @@ interface Rozbicie {
   rzut: number;
   blok: number;
   unik: number;
+  /** ciosy, które doszły z najsłabszym rzutem — dawniej byłyby pudłem */
+  musniecia: number;
   trafione: number;
 }
 
@@ -86,7 +88,16 @@ function stoCiosow(dystansM: number, pitch: number, seed: number, postawa: Posta
   p.pitch = pitch;
   const rng = mulberry32(seed);
   const out = makeAttackResult();
-  const r: Rozbicie = { poza: 0, luk: 0, pion: 0, rzut: 0, blok: 0, unik: 0, trafione: 0 };
+  const r: Rozbicie = {
+    poza: 0,
+    luk: 0,
+    pion: 0,
+    rzut: 0,
+    blok: 0,
+    unik: 0,
+    musniecia: 0,
+    trafione: 0,
+  };
 
   for (let i = 0; i < 100; i++) {
     // Świeży stan przed każdym ciosem: mierzymy pojedynczy cios, a nie wyczerpanie
@@ -110,8 +121,10 @@ function stoCiosow(dystansM: number, pitch: number, seed: number, postawa: Posta
     else if (cios === Swing.OffAim) r.pion++;
     else if (out.blocked) r.blok++;
     else if (out.dodged) r.unik++;
-    else if (out.landed) r.trafione++;
-    else r.rzut++;
+    else if (out.landed) {
+      r.trafione++;
+      if (out.quality <= COMBAT.grazeDamage) r.musniecia++;
+    } else r.rzut++;
   }
   return r;
 }
@@ -119,7 +132,8 @@ function stoCiosow(dystansM: number, pitch: number, seed: number, postawa: Posta
 function wiersz(nazwa: string, r: Rozbicie): string {
   const chybione = 100 - r.trafione;
   return (
-    `${nazwa.padEnd(26)} trafione ${String(r.trafione).padStart(3)}%  chybione ${String(chybione).padStart(3)}%  ` +
+    `${nazwa.padEnd(26)} trafione ${String(r.trafione).padStart(3)}% (w tym muśnięć ` +
+    `${String(r.musniecia).padStart(3)}%)  chybione ${String(chybione).padStart(3)}%  ` +
     `| poza zasięgiem ${r.poza}%  poza łukiem ${r.luk}%  poza pionem ${r.pion}%  ` +
     `rzut ${r.rzut}%  blok ${r.blok}%  unik ${r.unik}%`
   );
@@ -136,7 +150,13 @@ describe('pomiar: dlaczego cios gracza nie dochodzi', () => {
     console.log(`zasięg ciosu: ${zasieg.toFixed(2)} m (broń 1,6 m + 0,5 m na ciała)`);
     console.log('--- gracz patrzy poziomo (pitch 0) ---');
     for (const [nazwa, d] of dystanse) {
-      console.log(wiersz(nazwa, stoCiosow(d, 0, 7 + Math.round(d * 100))));
+      const r = stoCiosow(d, 0, 7 + Math.round(d * 100));
+      console.log(wiersz(nazwa, r));
+      // Kryterium poprawki: w zwarciu, przy nieruchomym celu i poziomym patrzeniu,
+      // nie wolno stracić ani jednego ciosu. Przed zmianą było tu 100% chybień.
+      expect(r.pion).toBe(0);
+      expect(r.rzut).toBe(0);
+      expect(r.trafione).toBe(100);
     }
 
     console.log('--- gracz celuje w środek sylwetki goblina ---');
@@ -158,7 +178,7 @@ describe('pomiar: dlaczego cios gracza nie dochodzi', () => {
     expect(true).toBe(true);
   });
 
-  it('sama szansa trafienia z wzoru i długość serii pudeł', () => {
+  it('sama szansa czystego ciosu z wzoru i długość serii muśnięć', () => {
     const p = gracz();
     const g = goblin(1);
     const szansa = hitChance(p.actor, g.actor);
@@ -168,30 +188,35 @@ describe('pomiar: dlaczego cios gracza nie dochodzi', () => {
         `${p.actor.attrs[1]}×${COMBAT.hitPerAgi} − obrona goblina ${obrona.toFixed(4)} = ` +
         `${szansa.toFixed(4)} (${(szansa * 100).toFixed(1)}%)`,
     );
+    // Ten sam rzut, inne znaczenie: nie „czy cios istnieje", tylko „jak dobry".
+    // Seria niskich rzutów to dziś seria muśnięć, a nie seria zdarzeń bez skutku —
+    // hp przeciwnika spada przez cały czas i widać to na pasku.
     const q = 1 - szansa;
     console.log(
-      `pudło pod rząd: 2× ${(q ** 2 * 100).toFixed(1)}%, 3× ${(q ** 3 * 100).toFixed(1)}%, ` +
+      `muśnięcie pod rząd: 2× ${(q ** 2 * 100).toFixed(1)}%, 3× ${(q ** 3 * 100).toFixed(1)}%, ` +
         `4× ${(q ** 4 * 100).toFixed(1)}%, 5× ${(q ** 5 * 100).toFixed(1)}%; ` +
-        `średnia długość serii pudeł ${(1 / szansa - 1).toFixed(2)} ciosu, ` +
-        `oczekiwany czas do trafienia ${(((1 / szansa) * 660) / 1000).toFixed(2)} s przy cyklu 660 ms`,
+        `oczekiwany czas do czystego ciosu ${(((1 / szansa) * 660) / 1000).toFixed(2)} s ` +
+        `przy cyklu 660 ms — a obrażenia lecą od pierwszego ciosu`,
     );
     expect(szansa).toBeGreaterThan(0);
   });
 
   it('okno pionowe: przy jakim kącie patrzenia goblin jest w oknie', () => {
-    // Okno liczone tak, jak w `serviceSwing`: przedział kątów zajmowany przez
-    // sylwetkę, rozszerzony marginesem z contentu.
+    // Okno liczone tak, jak w `serviceSwing`: przedział wysokości zajmowany przez
+    // sylwetkę, rozszerzony marginesem z contentu **w metrach**, dopiero potem
+    // zamieniony na kąt na dystansie celu.
     const barki = PLAYER_EYE;
     for (const d of [0.6, 1.05, 2.05, 3, 5]) {
-      const doGlowy = Math.atan2(goblinDef.heightM - barki, d) + COMBAT.aimMarginRad;
-      const doStop = Math.atan2(0 - barki, d) - COMBAT.aimMarginRad;
+      const doGlowy = Math.atan2(goblinDef.heightM + COMBAT.aimMarginM - barki, d);
+      const doStop = Math.atan2(0 - COMBAT.aimMarginM - barki, d);
       const st = (v: number) => ((v * 180) / Math.PI).toFixed(1).padStart(6);
       console.log(
         `dystans ${d.toFixed(2)} m: okno od ${st(doStop)}° do ${st(doGlowy)}°  ` +
           `${doGlowy >= 0 ? 'poziome patrzenie mieści się' : 'poziome patrzenie WYPADA z okna'}`,
       );
+      // w zasięgu broni (2,1 m) poziome patrzenie ma się mieścić zawsze
+      if (d <= 2.05) expect(doGlowy).toBeGreaterThan(0);
     }
-    expect(true).toBe(true);
   });
 });
 
