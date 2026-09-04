@@ -47,13 +47,29 @@ describe('celowanie w pionie', () => {
     p.pitch = Math.atan2(def.heightM * 0.5 - 1.7, dist);
     expect(cios(p, g)).toBe(Swing.Resolved);
 
-    // poziomo przed siebie — przy dwóch metrach czubek głowy jest 8,5° niżej
+    // Poziomo przed siebie: czubek głowy goblina jest przy dwóch metrach 8,5° niżej,
+    // ale margines w metrach podnosi górną krawędź okna nad horyzont. Patrzenie
+    // przed siebie w zwarciu MA trafiać — z tego brał się zgłoszony błąd.
     p.pitch = 0;
+    expect(cios(p, g)).toBe(Swing.Resolved);
+
+    // wyraźnie nad głowę: pół metra nad czubkiem to przy dwóch metrach 5,7°
+    p.pitch = 0.3;
     expect(cios(p, g)).toBe(Swing.OffAim);
 
     // w ziemię tuż przed sobą
     p.pitch = -1.2;
     expect(cios(p, g)).toBe(Swing.OffAim);
+  });
+
+  it('poziome patrzenie trafia na każdym dystansie zasięgu broni', () => {
+    // Kryterium poprawki: w zwarciu nie wolno chybić dlatego, że cel jest niski.
+    for (const dystansM of [0.6, 1.05, 2.05]) {
+      const p = gracz(0, 0, 0);
+      const g = goblin(dystansM / MPC, 0, 0);
+      p.pitch = 0;
+      expect(cios(p, g)).toBe(Swing.Resolved);
+    }
   });
 
   it('okno rośnie z wysokością celu: na trolla patrzy się wyżej niż na wilka', () => {
@@ -68,15 +84,25 @@ describe('celowanie w pionie', () => {
     expect(cios(p, wilk)).toBe(Swing.OffAim);
   });
 
-  it('margines z contentu jest tym, co rozszerza okno', () => {
+  it('margines z contentu jest w metrach i rozszerza okno o te metry', () => {
     const p = gracz(0, 0, 0);
     const g = goblin(1, 0, 0);
-    const doGlowy = Math.atan2(def.heightM - 1.7, 2);
+    const krawedz = Math.atan2(def.heightM + COMBAT.aimMarginM - 1.7, 2);
 
-    p.pitch = doGlowy + COMBAT.aimMarginRad * 0.9;
+    p.pitch = krawedz * 0.98;
     expect(cios(p, g)).toBe(Swing.Resolved);
-    p.pitch = doGlowy + COMBAT.aimMarginRad * 1.1;
+    p.pitch = krawedz * 1.02 + 0.01;
     expect(cios(p, g)).toBe(Swing.OffAim);
+  });
+
+  it('ten sam margines daje szersze okno z bliska niż z daleka', () => {
+    // O to w tej zmianie chodzi: pół metra to przy 0,6 m osiemnaście stopni,
+    // a przy trzech metrach niecałe sześć. Margines w stopniach robił odwrotnie.
+    const gora = (dystansM: number) =>
+      Math.atan2(def.heightM + COMBAT.aimMarginM - 1.7, dystansM);
+    expect(gora(0.6)).toBeGreaterThan(gora(2.05));
+    expect(gora(2.05)).toBeGreaterThan(gora(3));
+    expect(gora(3)).toBeGreaterThan(0);
   });
 });
 

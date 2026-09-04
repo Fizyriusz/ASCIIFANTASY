@@ -68,16 +68,72 @@ describe('zamach jako odcinek czasu', () => {
   });
 });
 
-describe('rzut na trafienie', () => {
-  it('unik w oknie czasowym obniża szansę trafienia', () => {
+/** Rzuty po kolei: `resolveAttack` woła rng najpierw na jakość, potem na obrażenia. */
+function kolejno(...wartosci: number[]): () => number {
+  let i = 0;
+  return () => wartosci[Math.min(i++, wartosci.length - 1)]!;
+}
+
+describe('rzut na siłę ciosu', () => {
+  it('unik jest nietykalnością, a nie premią do obrony', () => {
     const att = player();
     const def = goblin();
     const bez = hitChance(att, def);
     beginDodge(def);
-    const zUnikiem = hitChance(att, def);
-    // pełne 0,45 obrony nie zawsze da się odjąć — dolny klamr trzyma 5% ryzyka
-    expect(zUnikiem).toBeCloseTo(Math.max(COMBAT.hitMin, bez - COMBAT.defDodgeWindow), 5);
-    expect(zUnikiem).toBeLessThan(bez);
+    // Rzut się nie zmienia — unik nie utrudnia trafienia, tylko usuwa ciało z drogi.
+    expect(hitChance(att, def)).toBe(bez);
+
+    const out = makeAttackResult();
+    const przed = def.hp;
+    resolveAttack(att, def, () => 0.01, out);
+    expect(out.dodged).toBe(true);
+    expect(out.landed).toBe(false);
+    expect(def.hp).toBe(przed);
+  });
+
+  it('cios, który przeszedł geometrię, dochodzi zawsze — rzut decyduje o sile', () => {
+    // To jest cała zmiana: nie ma rzutu, po którym nic się nie dzieje. Zerowe
+    // obrażenia mogą wyjść wyłącznie z powodu, który gracz widzi.
+    const att = player();
+    equipWeapon(att, Weapon.Club); // szeroki przedział obrażeń: skalę widać wyraźniej
+    let najslabszy = Infinity;
+    let najmocniejszy = 0;
+    for (let i = 0; i < 200; i++) {
+      const def = goblin();
+      const out = makeAttackResult();
+      // pierwszy rzut idzie na jakość, drugi na obrażenia broni — trzymamy drugi
+      // w środku przedziału, żeby mierzyć samą jakość
+      resolveAttack(att, def, kolejno(i / 200, 0.5), out);
+      expect(out.landed).toBe(true);
+      expect(out.damage).toBeGreaterThan(0);
+      najslabszy = Math.min(najslabszy, out.damage);
+      najmocniejszy = Math.max(najmocniejszy, out.damage);
+    }
+    // muśnięcie ma być wyraźnie słabsze od czystego ciosu, inaczej skala nic nie znaczy
+    expect(najslabszy).toBeLessThan(najmocniejszy * 0.5);
+  });
+
+  it('wyższa umiejętność to mocniejsze ciosy, nie tylko częstsze', () => {
+    const suma = (skill: number) => {
+      const att = player();
+      equipWeapon(att, Weapon.Club);
+      let s = 0;
+      for (let i = 0; i < 200; i++) {
+        const def = goblin();
+        const out = makeAttackResult();
+        att.skills[Skill.Blade] = skill; // nauka w trakcie pomiaru by go przesunęła
+        att.skills[Skill.Blunt] = skill;
+        resolveAttack(att, def, kolejno(i / 200, 0.5), out);
+        s += out.damage;
+      }
+      return s;
+    };
+    const slaby = suma(10);
+    const mocny = suma(80);
+    console.log(
+      `ostrze 10 → 80: średnie obrażenia ciosu rosną o ${(((mocny - slaby) / slaby) * 100).toFixed(0)}%`,
+    );
+    expect(mocny).toBeGreaterThan(slaby * 1.2);
   });
 
   it('wytrącony z równowagi nie broni się wcale', () => {
@@ -96,7 +152,6 @@ describe('rzut na trafienie', () => {
     const cieply = makeActor(20, 20, [10, 10, 10, 10, 10, 10], [0, 0, 0, 0, 0]);
     const zwinny = goblin();
     zwinny.skills[Skill.Dodge] = 100;
-    beginDodge(zwinny);
     expect(hitChance(cieply, zwinny)).toBeGreaterThanOrEqual(COMBAT.hitMin);
   });
 });

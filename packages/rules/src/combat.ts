@@ -9,9 +9,14 @@
  * Wytrzymałość jest zasobem, który tę decyzję wymusza. Bez niej zostaje klikanie:
  * optymalną strategią byłoby atakowanie bez przerwy, bo nic nie kosztuje.
  *
- * Rzut jest jeden — `baza + umiejętność + zręczność − obrona`. Bez tabel, bez rzutów
- * przeciwstawnych, bez stopni sukcesu: każdy z nich to kolejny plik do strojenia,
- * a nie kolejna decyzja dla gracza.
+ * Rzut jest jeden — `baza + umiejętność + zręczność − obrona` — i decyduje o **sile**
+ * ciosu, nie o jego istnieniu. Cios, który przeszedł geometrię i nie został zablokowany
+ * ani ominięty unikiem, dochodzi zawsze; rzut przelicza się na jakość trafienia,
+ * od muśnięcia po czysty cios.
+ *
+ * Zasada, z której to wynika: **jedynymi powodami zerowych obrażeń mają być powody,
+ * które gracz widzi** — blok, unik, brak zasięgu. Kości produkujące niewidzialne zera
+ * to ta sama klasa błędu co ciche ciosy z M3b: gra reaguje, ale nie ma czego odczytać.
  *
  * Funkcje nie alokują: wynik trafienia zapisuje się do obiektu podanego przez
  * wywołującego, bo `resolveAttack` biegnie w pętli gry razem z renderem.
@@ -30,6 +35,12 @@ export interface AttackResult {
   landed: boolean;
   blocked: boolean;
   dodged: boolean;
+  /**
+   * jakość trafienia 0..1 — mnożnik obrażeń przed blokiem i pancerzem. Wystawiona,
+   * bo gra musi umieć pokazać różnicę między muśnięciem a czystym ciosem; bez tego
+   * skala jakości jest niewidoczna i wraca problem niewidzialnych zer.
+   */
+  quality: number;
   /** obrażenia po bloku i pancerzu */
   damage: number;
   killed: boolean;
@@ -38,7 +49,15 @@ export interface AttackResult {
 }
 
 export function makeAttackResult(): AttackResult {
-  return { landed: false, blocked: false, dodged: false, damage: 0, killed: false, staggered: false };
+  return {
+    landed: false,
+    blocked: false,
+    dodged: false,
+    quality: 0,
+    damage: 0,
+    killed: false,
+    staggered: false,
+  };
 }
 
 /**
@@ -128,22 +147,28 @@ export function hitChance(att: Actor, def: Actor): number {
   return p;
 }
 
-/** Obrona: bierna, plus umiejętność uniku, plus premia za unik trafiony w oknie. */
+/**
+ * Obrona: bierna plus umiejętność uniku. Okno uniku **nie** dokłada tu nic — jest
+ * nietykalnością rozstrzyganą osobno (`resolveAttack`), a nie premią do rzutu.
+ * Dwa mechanizmy na jeden efekt znaczą, że nie da się wyregulować żadnego z nich.
+ */
 export function defenseOf(def: Actor): number {
   if (def.stance === Stance.Dead || def.stance === Stance.Stagger) return 0;
-  let d = COMBAT.defBase + (def.skills[Skill.Dodge] ?? 0) * COMBAT.defPerDodgeSkill;
-  if (def.dodgeMs > 0) d += COMBAT.defDodgeWindow;
-  return d;
+  return COMBAT.defBase + (def.skills[Skill.Dodge] ?? 0) * COMBAT.defPerDodgeSkill;
 }
 
 /**
  * Rozstrzyga jeden cios. `rng` to funkcja 0..1 podana z zewnątrz — reguły nie znają
  * generatora, dzięki czemu test może podać deterministyczny, a gra losowy.
+ *
+ * Kolejność jest znacząca: unik rozstrzyga się **przed** rzutem, bo jest nietykalnością,
+ * a nie utrudnieniem. Potem cios dochodzi zawsze i rzut decyduje wyłącznie o sile.
  */
 export function resolveAttack(att: Actor, def: Actor, rng: () => number, out: AttackResult): void {
   out.landed = false;
   out.blocked = false;
   out.dodged = false;
+  out.quality = 0;
   out.damage = 0;
   out.killed = false;
   out.staggered = false;
@@ -152,21 +177,33 @@ export function resolveAttack(att: Actor, def: Actor, rng: () => number, out: At
   const w = weaponOf(att);
   const weaponSkill = skillOf(w);
 
-  if (rng() >= hitChance(att, def)) {
-    // pudło; nauka jest wolniejsza, ale jest — inaczej opłaca się bić tylko słabszych
+  // Unik: cios mija ciało. Widoczny powód zera — gracz właśnie zobaczył, jak
+  // przeciwnik odskakuje.
+  if (def.dodgeMs > 0) {
+    out.dodged = true;
+    train(def, Skill.Dodge, true);
     train(att, weaponSkill, false);
-    if (def.dodgeMs > 0) {
-      out.dodged = true;
-      train(def, Skill.Dodge, true);
-    }
     return;
   }
 
+  // Jakość ciosu to **szansa trafienia przesunięta rzutem**: średnio wychodzi tyle,
+  // ile wynosi szansa, więc dawne strojenie zostaje w mocy (kiedyś `p` mówiło, jaki
+  // ułamek ciosów przechodzi w całości, dziś — jaki ułamek obrażeń przechodzi
+  // średnio). Umiejętność działa przez `hitChance` tak samo mocno jak wcześniej,
+  // tylko na skali zamiast w bramce. Dół jest podparty muśnięciem, bo zero obrażeń
+  // wolno wyprodukować wyłącznie powodowi, który gracz widzi.
+  const szansa = hitChance(att, def);
+  const rzut = rng();
+  const udany = rzut < szansa;
+  train(att, weaponSkill, udany);
+
   out.landed = true;
-  train(att, weaponSkill, true);
+  const jakosc = szansa + (0.5 - rzut);
+  out.quality = jakosc < COMBAT.grazeDamage ? COMBAT.grazeDamage : jakosc > 1 ? 1 : jakosc;
 
   let dmg =
     (w.dmgMin + rng() * (w.dmgMax - w.dmgMin)) *
+    out.quality *
     weaponWearFactor(att) *
     (1 + ((att.attrs[Attr.Str] ?? 0) - 50) * COMBAT.dmgPerStr);
   att.weaponWear = Math.min(100, att.weaponWear + w.wearPerHit);

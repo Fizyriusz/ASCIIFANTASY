@@ -118,10 +118,12 @@ export function serviceSwing(
   }
 
   // Okno pionowe patrzenia: sylwetka zajmuje **przedział** kątów, nie punkt, więc
-  // porównujemy przedział z przedziałem. Margines z contentu rozszerza go z obu stron.
-  const doGlowy = Math.atan2(glowa - barki, distM);
-  const doStop = Math.atan2(stopy - barki, distM);
-  if (self.pitch > doGlowy + COMBAT.aimMarginRad || self.pitch < doStop - COMBAT.aimMarginRad) {
+  // porównujemy przedział z przedziałem. Margines z contentu jest w METRACH i wchodzi
+  // do przedziału przed policzeniem kąta — ten sam kąt znaczy co innego z bliska niż
+  // z daleka, a właśnie z bliska stoi się w walce.
+  const doGlowy = Math.atan2(glowa + COMBAT.aimMarginM - barki, distM);
+  const doStop = Math.atan2(stopy - COMBAT.aimMarginM - barki, distM);
+  if (self.pitch > doGlowy || self.pitch < doStop) {
     return Swing.OffAim;
   }
 
