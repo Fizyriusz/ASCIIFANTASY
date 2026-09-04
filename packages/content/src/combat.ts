@@ -20,13 +20,18 @@ export const COMBAT = {
    */
   swingArcRad: 0.55,
   /**
-   * radiany: margines okna pionowego. Cel jest trafiony, gdy kąt elewacji patrzenia
-   * mieści się w kącie, jaki zajmuje sylwetka celu, powiększonym o tyle z każdej
-   * strony. Przy 2 m sylwetka goblina zajmuje od −9° (głowa) do −40° (stopy), więc
-   * margines 8° robi z tego okno 47° — hojne, ale wymuszające patrzenie **na**
-   * przeciwnika, a nie nad niego.
+   * **metry**: o ile wolno minąć sylwetkę celu w pionie — nad głową i pod stopami,
+   * mierzone na dystansie celu.
+   *
+   * Margines był wcześniej kątem (8°) i to był błąd, bo ten sam kąt znaczy co innego
+   * z bliska niż z daleka: przy 0,6 m osiem stopni to 8 cm, przy 3 m — 42 cm. Efekt
+   * zmierzony: goblin ma 1,4 m, oko gracza 1,7 m, więc w zwarciu cel jest zawsze pod
+   * horyzontem i **poziome patrzenie chybiało w 100% ciosów** na każdym dystansie
+   * broni. W metrach to samo pół metra daje +18° przy 0,6 m, +11° przy 1,05 m
+   * i +5,6° przy 2,05 m — poziome patrzenie w zwarciu trafia zawsze, a cel wysoko
+   * nad głową nadal wymaga zadarcia jej.
    */
-  aimMarginRad: 0.14,
+  aimMarginM: 0.5,
   /**
    * metry: pionowy zasięg ciosu wokół wysokości barków. Rozstrzyga po stronie AI
    * (byt celuje w środek sylwetki, więc kąt patrzenia niczego by nie ograniczył)
@@ -41,11 +46,14 @@ export const COMBAT = {
   defBase: 0.05,
   /** wkład uniku (0..100) w obronę, gdy obrońca stoi */
   defPerDodgeSkill: 0.0015,
-  /** ile obrony dokłada unik trafiony w oknie czasowym */
-  defDodgeWindow: 0.45,
   /**
-   * ms: jak długo unik daje premię do obrony. **To jest regulator balansu** — okno
-   * nietykalności, w którym cios przeciwnika mija.
+   * ms: okno nietykalności uniku. Cios, który trafia w to okno, **mija** — bez rzutu
+   * i bez obrażeń. To jest regulator balansu i jedyny mechanizm uniku.
+   *
+   * Wcześniej okno robiło dwie rzeczy naraz: dawało nietykalność i dokładało +0,45
+   * do obrony. Dwa mechanizmy na jeden efekt znaczą, że nie da się wyregulować
+   * żadnego z nich osobno — a razem dawały 96% chybień, czyli i tak nietykalność,
+   * tylko wyliczoną okrężnie.
    */
   dodgeWindowMs: 480,
   /**
@@ -79,6 +87,23 @@ export const COMBAT = {
   /** wytrzymałość zjadana przez blok, na punkt zablokowanych obrażeń */
   blockStaminaPerDamage: 1.6,
 
+  /**
+   * dolna granica jakości ciosu: ułamek obrażeń przy najgorszym rzucie. Rzut nie
+   * decyduje o tym, czy cios istnieje — o tym decyduje geometria — tylko o jego
+   * **jakości**: od muśnięcia (`grazeDamage` obrażeń) po czysty cios (pełne obrażenia).
+   *
+   * Powód jest ten sam, co przy cichych ciosach z M3b: jedynymi powodami zerowych
+   * obrażeń mają być powody, które gracz widzi — blok, unik, brak zasięgu. Kości
+   * produkujące niewidzialne zera to informacja, której nie da się odczytać z ekranu.
+   *
+   * Sama skala jest tak zbudowana, że średnia jakość równa się szansie trafienia
+   * (`hitChance`), więc dawne strojenie tempa walki zostaje w mocy — ta stała tylko
+   * podpiera dół. Im wyżej, tym bardziej płaska rola umiejętności: podniesienie
+   * ostrza z 10 na 80 daje przy 0,25 **+43%** średnich obrażeń ciosu, a przy 0,34
+   * już tylko +19%. Pomiar 10 000 pojedynków: mediana starcia 5,3 s wobec 5,1 s
+   * w modelu z pudłem, p95 11,7 s wobec 12,0 s — tempo walki bez zmian.
+   */
+  grazeDamage: 0.25,
   /** mnożnik obrażeń od siły: 1.0 przy sile 50 */
   dmgPerStr: 0.01,
   /** minimalne obrażenia trafienia, którego pancerz nie zatrzymał w całości */
