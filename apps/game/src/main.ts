@@ -407,8 +407,17 @@ function playerCombat(dtMs: number): void {
   if (cios === Swing.None) return;
   if (cios !== Swing.Resolved) {
     // Cios doszedł, ale nie miał kogo dosięgnąć. To jest wynik, a nie brak wyniku —
-    // bez tego wpisu gracz nie odróżnia „za daleko" od „nic się nie stało".
-    note(cios === Swing.OutOfReach ? 'cios w powietrze — za daleko' : 'cios w powietrze', EventKind.Neutral);
+    // i każda z trzech przyczyn wymaga **innej** reakcji gracza, więc każda ma własny
+    // komunikat. Jeden wspólny „cios w powietrze" mówił tyle, co nic: podejdź, obróć
+    // się i patrz niżej to trzy różne polecenia.
+    note(
+      cios === Swing.OutOfReach
+        ? 'cios w powietrze — za daleko'
+        : cios === Swing.OffAim
+          ? 'cios w powietrze — nad celem'
+          : 'cios w powietrze — obok celu',
+      EventKind.Neutral,
+    );
     return;
   }
 
@@ -422,9 +431,16 @@ function playerCombat(dtMs: number): void {
     note('goblin uskoczył', EventKind.Neutral);
   } else if (attack.landed) {
     bestiary.markHit(target);
-    note(attack.staggered ? 'trafiony, zachwiał się' : 'trafiony', EventKind.Good);
-  } else {
-    note('pudło', EventKind.Neutral);
+    // Skala jakości ciosu musi być widoczna, inaczej wraca problem, przez który
+    // zniknęło pudło: gra reaguje, a gracz nie ma czego odczytać.
+    note(
+      attack.staggered
+        ? 'trafiony, zachwiał się'
+        : attack.quality <= COMBAT.grazeDamage
+          ? 'muśnięcie'
+          : 'trafiony',
+      EventKind.Good,
+    );
   }
 }
 
