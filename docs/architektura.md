@@ -556,18 +556,28 @@ która zna pozycje (`serviceSwing`) — reguły walki nie znają geometrii.
 **Trafienie jest celowane, ale bez stref ciała** (M3f). Warunek dojścia ciosu czyta
 trzy rzeczy: odległość poziomą, łuk w poziomie (`COMBAT.swingArcRad`, 0,55 rad — węższy
 niż połowa pola widzenia, żeby nie dało się trafić czegoś poza ekranem) oraz **okno
-pionowe**. Sylwetka celu zajmuje przedział kątów, nie punkt, więc porównujemy przedział
-z przedziałem i rozszerzamy go o margines z contentu. Przy 2 m goblin zajmuje od −8,5°
-(czubek głowy) do −40,4° (stopy), co znaczy, że patrzenie poziomo przed siebie **go mija**
-— i to jest cała reguła: trzeba patrzeć na przeciwnika, a wysokość bytu zaczyna mieć
-znaczenie (na wilka niżej niż na trolla).
+pionowe**. Sylwetka celu zajmuje przedział wysokości, nie punkt, więc porównujemy
+przedział z przedziałem, a margines z contentu jest **w metrach** (`COMBAT.aimMarginM`,
+0,5 m nad głową i pod stopami) i wchodzi do przedziału **przed** policzeniem kąta.
+
+Margines był początkowo kątem (8°) i to był błąd wart zapisania, bo wyglądał na
+kosmetykę, a nie na model. Ten sam kąt znaczy co innego z bliska niż z daleka — przy
+0,6 m osiem stopni to 8 cm, przy 3 m 42 cm — a walka wręcz dzieje się właśnie z bliska.
+Goblin ma 1,4 m, oko gracza 1,7 m, więc w zwarciu cel jest **zawsze pod horyzontem**:
+pomiar stu ciosów w nieruchomy cel dał 100% chybień „poza pionem" przy poziomym
+patrzeniu, na każdym z trzech dystansów broni. W metrach to samo pół metra daje okno
+do +18,4° przy 0,6 m, +10,8° przy 1,05 m i +5,6° przy 2,05 m — poziome patrzenie
+w zwarciu trafia zawsze, a cel wysoko nad głową nadal wymaga zadarcia jej.
 
 Po stronie AI kąt patrzenia niczego by nie ograniczał, bo byt celuje w środek sylwetki,
 więc tam rozstrzyga **pionowy zasięg ciosu** (`COMBAT.verticalReachM`). To jest warunek,
 przez który byt z przęsła mostu nie dosięga tego pod spodem — i odwrotnie.
 
-Koszt zmierzony ścieżką gry: gracz celujący w przeciwnika traci **0%** ciosów nawet przy
-rozrzucie ±20°; gracz patrzący poziomo przed siebie traci 100%.
+Rysunek i reguły muszą mówić to samo, i to jest sprawdzane pomiarem: pasmo kątów,
+w którym sprite goblina zakrywa celownik, mieści się w całości w oknie trafienia
+(przy 1,05 m sprite od −51° do −24°, okno od −64,5° do +10,8°). Koszt zmierzony ścieżką
+gry: **0%** straconych ciosów przy celowaniu w sylwetkę nawet z rozrzutem ±20°
+i **0%** przy patrzeniu poziomo przed siebie.
 
 **Każdy zamach kończy się wynikiem.** `serviceSwing` zwraca `Swing`: rozstrzygnięty,
 poza zasięgiem albo poza łukiem ciosu — nigdy cicho. Wcześniej cios poza zasięgiem
@@ -582,10 +592,33 @@ się w trakcie własnego ciosu ani dłużej niż `COMBAT.retreatMs`.
 gracz wchodził w potwora (zmierzone 0,00 m dystansu po dziesięciu sekundach nacierania),
 a cofający się byt wyglądał, jakby dawał się przepychać chodzeniem.
 
-**Trafienie to jeden rzut**: `baza + umiejętność + zręczność − obrona`, klamrowany
-do 5–95%. Blok redukuje obrażenia i zjada wytrzymałość proporcjonalnie do tego, co
-zatrzymał — i pęka, gdy jej zabraknie. Unik ma krótkie okno i dłuższe odbicie, więc
-unik w ciemno jest gorszy niż unik w odpowiedzi na zamach.
+**Rzut decyduje o sile ciosu, nie o jego istnieniu.** Cios, który przeszedł geometrię
+i nie został zablokowany ani ominięty unikiem, **dochodzi zawsze**; ten sam jeden rzut
+(`baza + umiejętność + zręczność − obrona`, klamrowany do 5–95%) przelicza się na jakość
+trafienia: od muśnięcia (`COMBAT.grazeDamage`, 25% obrażeń) po czysty cios. Skala jest
+tak zbudowana, że średnia jakość równa się szansie trafienia, więc strojenie tempa walki
+z M3b zostaje w mocy, a umiejętność działa tak samo mocno jak wcześniej — tylko na skali
+zamiast w bramce (ostrze 10 → 80 to +43% średnich obrażeń ciosu).
+
+**Zasada, z której to wynika: jedynymi powodami zerowych obrażeń mają być powody, które
+gracz WIDZI** — blok, unik, brak zasięgu. Kości produkujące niewidzialne zera to ta sama
+klasa błędu co ciche ciosy z M3b: gra reaguje na wejście gracza, ale nie zostawia niczego,
+co dałoby się odczytać z ekranu. Losowe pudło przy nieruchomym celu jest mechaniką z gier
+turowych i nie pasuje do walki, która ma telegraf, blok i unik na timing. Pomiar, który
+to rozstrzygnął: przy poprawnym celowaniu rzut odpowiadał za **100% chybień**, czyli 47%
+wszystkich ciosów w nieruchomego, nieruszającego się przeciwnika.
+
+Blok redukuje obrażenia i zjada wytrzymałość proporcjonalnie do tego, co zatrzymał —
+i pęka, gdy jej zabraknie. **Unik jest nietykalnością i niczym więcej**: cios trafiony
+w okno mija, bez rzutu i bez obrażeń. Wcześniej okno robiło to samo okrężnie, dokładając
++0,45 do obrony (96% chybień) — dwa mechanizmy na jeden efekt znaczą, że nie da się
+wyregulować żadnego z nich osobno. Okno jest krótsze od odbicia, więc unik w ciemno jest
+gorszy niż unik w odpowiedzi na zamach.
+
+Konsekwencja dla dziennika: każda przyczyna niedojścia ciosu ma **własny komunikat**
+(za daleko / nad celem / obok celu), bo „patrz niżej", „podejdź" i „obróć się" to trzy
+różne polecenia, a jeden wspólny wpis nie mówi żadnego z nich. Muśnięcie też jest nazwane
+— skala jakości musi być widoczna, inaczej wraca problem, przez który zniknęło pudło.
 
 **Hp nie regeneruje się nigdy.** Regeneruje się wyłącznie wytrzymałość, a przeciążenie
 ją spowalnia (do 35% przy pełnym udźwigu i niżej już nie schodzi). Regeneracja hp
