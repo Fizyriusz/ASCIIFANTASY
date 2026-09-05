@@ -12,8 +12,8 @@
  * musi znać jedno i drugie — i to jest właśnie warstwa gry.
  */
 
-import { addSource, clearSources, compileSprite, lightAt } from '@rpg/core';
-import type { LightRig, SpriteFrames, SpriteInstance } from '@rpg/core';
+import { addSource, clearSources, compileSprite, drawSprites, lightAt } from '@rpg/core';
+import type { Camera, LightRig, RenderContext, Screen, SpriteFrames, SpriteInstance } from '@rpg/core';
 import {
   CORPSE,
   DUNGEON_LIGHT,
@@ -96,6 +96,20 @@ export interface MobReport {
    * cichy brak wyniku sprawiał, że potwór machał pałką bez żadnego efektu.
    */
   whiffed: boolean;
+}
+
+/**
+ * Rysuje wszystko, co bestiariusz ma do pokazania: byty i zwłoki.
+ *
+ * Wydzielone z pętli gry, bo licznik podany **osobno od listy** był dokładnie tym
+ * miejscem, w którym zniknęły ciała: gra wołała `drawSprites(..., spriteList(),
+ * bestiary.mobs.length)`, a zwłoki są na tej liście za bytami. Wszystko po drodze
+ * było zielone i nic nie było widać. Tu licznik nie ma prawa się rozjechać z listą,
+ * a test może skończyć się w tym samym miejscu, w którym kończy się gra.
+ */
+export function drawBestiary(screen: Screen, cam: Camera, ctx: RenderContext, b: Bestiary): number {
+  const lista = b.spriteList();
+  return drawSprites(screen, cam, ctx, lista, lista.length);
 }
 
 /** Skompilowane rysunki, po jednym na rodzaj bytu. Kompilacja jest jednorazowa. */

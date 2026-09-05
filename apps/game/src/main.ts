@@ -62,7 +62,7 @@ import {
   EventKind,
   UI,
 } from '@rpg/ui';
-import { Bestiary, aiLabel, animate } from './entities.js';
+import { Bestiary, aiLabel, animate, drawBestiary } from './entities.js';
 import { dodgeSpeed, tryStep } from './move.js';
 import type { MobReport } from './entities.js';
 
@@ -908,7 +908,7 @@ function frame(t: number): void {
   // twardy limit ośmiu, więc wybór jest po odległości, a nie po kolejności w liście.
   zrodel = bestiary.feedLights(render.light, cam.x, cam.y);
   renderWorld(world, cam, screen, render);
-  drawSprites(screen, cam, render, bestiary.spriteList(), bestiary.mobs.length);
+  drawBestiary(screen, cam, render, bestiary);
   cam.yaw = yaw0;
   cam.pitch = pitch0;
 
