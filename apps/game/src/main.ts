@@ -183,6 +183,18 @@ world.loadRing(cam);
 cam.eyeZ = world.spanTop(Math.floor(cam.x), Math.floor(cam.y), 0) + PLAYER_EYE;
 /** wysokość, do której oko dąży; `cam.eyeZ` goni ją płynnie w `frame` */
 let eyeTarget = cam.eyeZ;
+/**
+ * Minuty zegara gry od startu partii — licznik **monotoniczny**, a nie pora dnia.
+ * Pora dnia jest z niego wyliczana, bo odwrotnie się nie da: `dayPhase` zawija się
+ * co dobę, więc różnica dwóch odczytów potrafi wyjść ujemna, a na takiej różnicy
+ * stoi wygasanie zwłok.
+ *
+ * PRZELICZNIK, o który łatwo się potknąć: doba trwa `DAY_SECONDS` = 480 sekund
+ * realnych, więc **minuta zegara to 0,33 sekundy realnej, a zegar idzie 180× szybciej
+ * od realnego**. Każda stała podawana w minutach zegara musi mieć przy sobie wartość
+ * w czasie realnym.
+ */
+let clockMin = START_HOUR * 24 * 60;
 /** 0..1 — pozycja w dobie; steruje mnożnikiem światła dziennego */
 let dayPhase = START_HOUR;
 let torchOn = true;
@@ -281,7 +293,7 @@ function snapshot(): GameSave {
   return {
     version: 1,
     seed: SEED,
-    clock: dayPhase * 24 * 60,
+    clock: clockMin,
     cellDeltas: {},
     flags: {},
     player: {
@@ -380,7 +392,10 @@ function loadGame(): void {
   pack.items.length = 0;
   for (const [kind, index] of p.items) pack.items.push({ kind: kind as 0 | 1, index });
   syncWeight(pack, a);
-  dayPhase = (save.clock / (24 * 60)) % 1;
+  clockMin = save.clock;
+  dayPhase = (clockMin / (24 * 60)) % 1;
+  // Zegar przed bytami: to on rozstrzyga, czy zwłoki z zapisu jeszcze leżą.
+  bestiary.setClock(clockMin);
   bestiary.restore(save.entities, save.entityDeltas);
   panel = Panel.None;
   land(p.x, p.y, p.yaw);
@@ -571,7 +586,7 @@ window.addEventListener('keydown', (e) => {
 
   if (e.code === 'KeyF') torchOn = !torchOn;
   // skok o pół doby: jedyny sposób zobaczyć noc bez czekania czterech minut
-  if (e.code === 'KeyN') dayPhase = (dayPhase + 0.5) % 1;
+  if (e.code === 'KeyN') clockMin += 12 * 60;
   if (e.code === 'KeyG') jumpToCave();
   if (e.code === 'KeyI') openPanel(Panel.Inventory);
   if (e.code === 'KeyC') openPanel(Panel.Character);
@@ -822,7 +837,9 @@ function frame(t: number): void {
     cam.eyeZ += (eyeTarget - cam.eyeZ) * (k > 1 ? 1 : k);
   }
 
-  dayPhase = (dayPhase + dt / DAY_SECONDS) % 1;
+  clockMin += (dt / DAY_SECONDS) * 24 * 60;
+  dayPhase = (clockMin / (24 * 60)) % 1;
+  bestiary.setClock(clockMin);
   render.light.daylight = daylightAt(dayPhase);
   // Pochodnia jedzie z okiem, a nie z nogami — inaczej cień własnej sylwetki
   // wychodziłby na ścianę przed graczem. Migotanie liczymy z zegara klatki,

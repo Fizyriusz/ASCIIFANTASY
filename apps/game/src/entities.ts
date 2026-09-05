@@ -15,6 +15,7 @@
 import { addSource, clearSources, compileSprite, lightAt } from '@rpg/core';
 import type { LightRig, SpriteFrames, SpriteInstance } from '@rpg/core';
 import {
+  CORPSE,
   DUNGEON_LIGHT,
   DUNGEON_SPAWN,
   FEEDBACK,
@@ -43,6 +44,27 @@ import type { EntityDelta, EntitySave } from '@rpg/world';
 const CLUSTER = 16;
 /** metry: wysokość oczu bytu nad gruntem, do linii wzroku i do trafień */
 const EYE_M = 1.2;
+
+/**
+ * Zwłoki: rekord na gruncie, nie byt. Nie ma postawy, AI ani ciała do kolizji —
+ * ma pozycję, rodzaj i chwilę śmierci. Wchodzi wyłącznie do listy sprite'ów.
+ */
+export interface Corpse {
+  /** pochodzenie bytu, którym był — po tym poznajemy go w deltach */
+  origin: string;
+  kind: number;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  /** minuta zegara gry, w której zginął */
+  diedAtMin: number;
+  /**
+   * jasność, z jaką rysuje się ciało — odświeżana w `step`, tak samo jak u bytów.
+   * Trup w ciemnym lochu ma być niewidoczny; to ta sama zasada, co `Material.minLum`.
+   */
+  lum: number;
+}
 
 export interface Mob {
   being: Being;
@@ -95,6 +117,17 @@ export class Bestiary {
    * To ta sama zasada, co przy świecie: seed plus delty, nigdy dziennik odwiedzin.
    */
   private readonly deltas = new Map<string, EntityDelta>();
+  /**
+   * Ciała leżące w pierścieniu. Osobna lista, bo trup nie jest bytem: nie liczy się
+   * do sufitu pierścienia, nie chodzi przez `step` i nie zajmuje miejsca w kolizji.
+   */
+  readonly corpses: Corpse[] = [];
+  /**
+   * Minuta zegara gry, ustawiana przez pętlę gry. Bestiariusz potrzebuje jej tylko
+   * po to, żeby wiedzieć, jak stare są zwłoki — własnego czasu nie liczy, bo dwa
+   * niezależne zegary rozjeżdżają się dokładnie wtedy, gdy gra jest wczytywana.
+   */
+  private clockMin = 0;
   private readonly sprites: SpriteInstance[] = [];
   /** żagwie lochu, w którym gracz się znajduje; puste na powierzchni */
   private lights: readonly DungeonLight[] = [];
@@ -107,6 +140,11 @@ export class Bestiary {
     private readonly seed: number,
     private readonly world: ChunkStore,
   ) {}
+
+  /** Zegar gry w minutach — jedyne źródło czasu dla wygasania zwłok. */
+  setClock(minutes: number): void {
+    this.clockMin = minutes;
+  }
 
   /**
    * Dorzuca byty z klastrów wokół gracza i zwalnia te, które odeszły. Wywoływane
@@ -152,6 +190,13 @@ export class Bestiary {
       this.release(m);
       this.mobs.splice(i, 1);
     }
+    // Ciała zwalniamy tak samo: wszystko, co o nich wiemy, siedzi już w delcie.
+    for (let i = this.corpses.length - 1; i >= 0; i--) {
+      const c = this.corpses[i]!;
+      const dx = c.x - px;
+      const dy = c.y - py;
+      if (dx * dx + dy * dy > r2) this.corpses.splice(i, 1);
+    }
   }
 
   /** Zdejmuje byt z symulacji, zapisując deltę tylko wtedy, gdy jest co zapisać. */
@@ -169,7 +214,79 @@ export class Bestiary {
       y: b.y,
       z: b.z,
       yaw: b.yaw,
+      // Byt zwalniany martwy, ale jeszcze nieprzerobiony na zwłoki (zdarza się przy
+      // zapisie tuż po ciosie): zwłoki zaczynają leżeć od teraz.
+      diedAtMin: martwy ? this.clockMin : -1,
     });
+  }
+
+  /**
+   * Zamienia zabity byt na zwłoki. Robimy to dopiero, gdy zgaśnie rozbłysk trafienia,
+   * bo to jest ostatni ciosowi należny kadr sprzężenia zwrotnego — a nie od razu,
+   * bo trup jako byt zjada sufit pierścienia.
+   */
+  private toCorpse(m: Mob): void {
+    const b = m.being;
+    this.live.delete(m.origin);
+    this.deltas.set(m.origin, {
+      origin: m.origin,
+      dead: true,
+      hp: 0,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      yaw: b.yaw,
+      diedAtMin: this.clockMin,
+    });
+    this.addCorpse({
+      origin: m.origin,
+      kind: b.kind,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      yaw: b.yaw,
+      diedAtMin: this.clockMin,
+      lum: b.lum,
+    });
+  }
+
+  /**
+   * Kładzie ciało, pilnując sufitu. Ponad sufit wygasa **najstarsze i na dobre**:
+   * jego delta wraca do postaci „zabity, po którym nic nie zostało", więc ciało
+   * nie ma prawa wrócić przy następnym wejściu w pierścień.
+   */
+  private addCorpse(c: Corpse): void {
+    this.corpses.push(c);
+    while (this.corpses.length > CORPSE.cap) {
+      let naj = 0;
+      for (let i = 1; i < this.corpses.length; i++) {
+        if (this.corpses[i]!.diedAtMin < this.corpses[naj]!.diedAtMin) naj = i;
+      }
+      const stary = this.corpses[naj]!;
+      this.expireCorpse(stary.origin);
+      this.corpses.splice(naj, 1);
+    }
+  }
+
+  /** Zwłoki wygasłe: delta zostaje (zabity zostaje zabity), ale bez ciała i pozycji. */
+  private expireCorpse(origin: string): void {
+    const d = this.deltas.get(origin);
+    if (d === undefined) return;
+    this.deltas.set(origin, {
+      origin,
+      dead: true,
+      hp: 0,
+      x: 0,
+      y: 0,
+      z: 0,
+      yaw: 0,
+      diedAtMin: -1,
+    });
+  }
+
+  /** Czy zwłoki z tej delty jeszcze leżą. Liczone zegarem gry, nie realnym. */
+  private corpseFresh(d: EntityDelta): boolean {
+    return d.dead && d.diedAtMin >= 0 && this.clockMin - d.diedAtMin < CORPSE.minutes;
   }
 
   /** Ile bytów jest w pierścieniu życia — sufit dotyczy okolicy, nie całej partii. */
@@ -199,7 +316,23 @@ export class Bestiary {
   ): boolean {
     if (this.live.has(origin)) return false;
     const delta = this.deltas.get(origin);
-    if (delta !== undefined && delta.dead) return false;
+    if (delta !== undefined && delta.dead) {
+      // Zabity nie wraca jako byt, ale dopóki trwa okno, wraca jako ciało — i to
+      // jest cała różnica między „zwłoki leżą" a „świat zjadł trupa".
+      if (this.corpseFresh(delta) && !this.corpses.some((c) => c.origin === origin)) {
+        this.addCorpse({
+          origin,
+          kind: 0,
+          x: delta.x,
+          y: delta.y,
+          z: delta.z,
+          yaw: delta.yaw,
+          diedAtMin: delta.diedAtMin,
+          lum: 0.5, // do pierwszego `step`, który policzy prawdziwe światło
+        });
+      }
+      return false;
+    }
     if (this.inRing(px, py) >= WILD_SPAWN.ringCap) return false;
 
     const m = delta === undefined
@@ -381,6 +514,7 @@ export class Bestiary {
         continue;
       }
 
+
       b.lum = this.lumAt(rig, b.x, b.y, b.z);
       updateAi(b, player, this.world, dtMs, rng, m.intent, CELL_METERS);
       this.moveBeing(b, m.intent, dtMs);
@@ -403,6 +537,18 @@ export class Bestiary {
         }
       }
       animate(b, m.intent, dtMs);
+    }
+
+    // Ciała nie chodzą i nie walczą, ale muszą reagować na światło: pochodnia
+    // wniesiona nad trupa ma go pokazać, a odejście z nią — schować.
+    for (const c of this.corpses) c.lum = this.lumAt(rig, c.x, c.y, c.z);
+
+    // Zabici schodzą z listy bytów, gdy zgaśnie rozbłysk ostatniego ciosu.
+    for (let i = this.mobs.length - 1; i >= 0; i--) {
+      const m = this.mobs[i]!;
+      if (m.being.actor.stance !== Stance.Dead || m.flashMs > 0) continue;
+      this.toCorpse(m);
+      this.mobs.splice(i, 1);
     }
   }
 
@@ -491,6 +637,21 @@ export class Bestiary {
         });
       }
     }
+    // Ciała: ta sama klatka `Death`, co przy bycie tuż po śmierci — rysunek jest
+    // kupką przy ziemi, więc trup nie stoi, tylko leży.
+    for (const c of this.corpses) {
+      const f = frames[c.kind];
+      if (f === undefined) continue;
+      this.sprites.push({
+        x: c.x,
+        y: c.y,
+        baseZ: c.z,
+        yaw: c.yaw,
+        frame: Frame.Death,
+        lum: c.lum,
+        frames: f,
+      });
+    }
     return this.sprites;
   }
 
@@ -523,6 +684,7 @@ export class Bestiary {
    */
   restore(list: readonly EntitySave[], deltas: readonly EntityDelta[]): void {
     this.mobs.length = 0;
+    this.corpses.length = 0;
     this.live.clear();
     this.deltas.clear();
     this.lochId = -1;
@@ -539,9 +701,17 @@ export class Bestiary {
     }
   }
 
-  /** Delty do zapisu: wszystko, co gracz zmienił w bytach już zwolnionych. */
+  /**
+   * Delty do zapisu: wszystko, co gracz zmienił w bytach już zwolnionych. Zwłoki,
+   * których okno minęło, tracą przy okazji pozycję i czas — po co plik ma nosić
+   * miejsce upadku ciała, którego nikt już nie zobaczy. Zabity zostaje zabity.
+   */
   deltasToSave(): EntityDelta[] {
-    return [...this.deltas.values()];
+    const out: EntityDelta[] = [];
+    for (const d of this.deltas.values()) {
+      out.push(this.corpseFresh(d) || !d.dead ? d : { ...d, x: 0, y: 0, z: 0, yaw: 0, diedAtMin: -1 });
+    }
+    return out;
   }
 
   /**
