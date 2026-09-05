@@ -111,20 +111,22 @@ interface SaveFile {
 
 Zapis po 200 h gry powinien mieć < 2 MB. Jeśli rośnie szybciej — coś zapisujemy niepotrzebnie.
 
-**Stan po M3e** (`packages/world/src/save.ts`, `SAVE_VERSION = 3`). Działa: seed, zegar,
+**Stan po M3e** (`packages/world/src/save.ts`, `SAVE_VERSION = 4`). Działa: seed, zegar,
 pełny stan gracza z plecakiem, delty komórek, byty żywe w chwili zapisu, **delty bytów
 zwolnionych** (§2.3a) i flagi. Nie ma jeszcze frakcji ani questów — wejdą
 z M4 i M5, jako kolejne pola i podbicie `SAVE_VERSION`.
 
 Format na dysku jest **krotkowy**: span leży jako `[bottom, top, mat, capMat, flags]`,
-delty komórek jako lista par, delta bytu jako `[pochodzenie]` albo
-`[pochodzenie, hp, x, y, z, yaw]`. Powód jest zmierzony na 200 godzinach syntetycznej
+delty komórek jako lista par, delta bytu w trzech długościach: `[pochodzenie]` (zabity
+bez zwłok), `[pochodzenie, hp, x, y, z, yaw]` (ranny) i `[pochodzenie, 0, x, y, z, yaw,
+czas śmierci]` (zabity, po którym leży ciało). Powód jest zmierzony na 200 godzinach syntetycznej
 gry: **832 kB w krotkach zamiast 2697 kB w obiektach**. Sama zamiana delt bytów
 z obiektów na krotki to 29,7 B zamiast 117,5 B na wpis — przy 12 000 wpisów różnica
 między 832 kB a 1861 kB, czyli między zapasem a jego brakiem w limicie 2 MB.
 
-Pozycja zabitego bytu nie idzie do pliku wcale, bo jest nieistotna; pozycje rannych
-zaokrąglamy do centymetra, a zwrot do tysięcznej radiana. Rozdzielczość ponad tę nie jest
+Pozycja zabitego bytu idzie do pliku tylko dopóki leżą po nim zwłoki — potem jest
+nieistotna i wpis wraca do samego pochodzenia. Pozycje zaokrąglamy do centymetra,
+a zwrot do tysięcznej radiana. Rozdzielczość ponad tę nie jest
 widoczna w grze, a w pliku kosztuje kilkanaście bajtów na wpis.
 
 `parse` zwraca `null` zamiast rzucać, a klucz delty o złym kształcie jest pomijany:
@@ -171,6 +173,41 @@ Zmierzone (`tools/harness/src/life.test.ts`, `life.bench.ts`):
 - droga powrotna po 2 km: 90 bytów; po zabiciu jednego 89, różnica dokładnie o to jedno
   pochodzenie,
 - koszt klatki: **0,027 ms p99** na stojąco, 0,028 ms w biegu (budżet 0,3 ms).
+
+**Zwłoki są rekordem, nie bytem** (M3e). Zabity byt schodzi z listy bytów, gdy zgaśnie
+rozbłysk ostatniego ciosu — a nie od razu, bo ten rozbłysk jest ostatnim kadrem
+sprzężenia zwrotnego, które gracz dostaje za zabicie. Zostaje po nim `Corpse`: pozycja,
+rodzaj, zwrot, jasność i minuta śmierci. Ciało rysuje się klatką `Death` (rysunek jest
+kupką przy ziemi, więc trup leży, a nie stoi) i to jest **wszystko**, co robi: nie ma
+postawy, AI ani miejsca w kolizji.
+
+Rozstrzygnięcie „rekord, nie byt" jest zmierzone, a nie estetyczne. Sufit pierścienia to
+24 byty przy typowym zaludnieniu 9–10, więc kilkanaście trupów w jednym miejscu
+zatrzymywałoby rodzenie nowych w okolicy — czyli wracałby w miniaturze błąd, od którego
+zaczęło się to zadanie. Kolizji trup i tak nie zajmował (`occupied` pomija `Dead` od M3b),
+więc bycie bytem nie dawało mu ani jednej używanej właściwości.
+
+Ciało żyje `CORPSE.minutes` minut zegara gry, a wygaśnięcie sprawdzamy **wyłącznie przy
+wejściu w pierścień**: trup, na który patrzysz, nie ma prawa wyparować w kadrze. Ponad
+`CORPSE.cap` ciał w pierścieniu najstarsze wygasa **na dobre** — zdjęte ciało, które
+wraca po chwili, byłoby gorsze od obu wariantów. Sufit jest zaworem: przemiar szesnastu
+miejsc dał 4–15 bytów w pierścieniu, więc na typowej łące nie ma kogo zabić tyle razy.
+
+Koszt zapisu (zmierzony): świeże zwłoki to `[pochodzenie, 0, x, y, z, zwrot, czas]`
+i **43,2 B**, wobec 14 B samego „zabity". Po oknie wpis wraca do krótkiej postaci, więc
+płacimy tylko za ciała leżące w tej chwili: pełny sufit to **518 B**, czyli 0,03% limitu
+2 MB. Wariant „trup leży wiecznie" kosztowałby +348 kB na 200 h gry i został odrzucony
+tą liczbą, a nie gustem.
+
+**Zegar gry idzie 180× szybciej od realnego.** Doba trwa `DAY_SECONDS` = 480 sekund
+realnych, więc minuta zegara to 0,33 sekundy realnej. **Każda stała podawana w minutach
+zegara musi mieć w komentarzu przelicznik na czas realny** — pierwsza wersja okna zwłok
+brzmiała „kilka minut gry" i znaczyła sekundę. `CORPSE.minutes` = 540 to trzy minuty
+realne, czyli dziewięć godzin w świecie.
+
+Zegar zapisu jest przy okazji **monotoniczny**, a nie porą dnia: `dayPhase` zawija się co
+dobę, więc różnica dwóch odczytów potrafi wyjść ujemna — a na takiej różnicy stoi
+wygasanie zwłok. Pora dnia jest liczona z zegara, nie odwrotnie.
 
 Na powierzchni grunt czytamy **z komórki kandydata**, bez pułapu liczonego od gracza.
 Pułap `pz + 3` wszedł w M3, żeby byty nie lądowały na łące nad lochem, ale od M3d
