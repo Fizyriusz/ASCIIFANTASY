@@ -92,6 +92,9 @@ function playFor(hours: number, perHour = 60): GameSave {
       y: rnd() * 1000,
       z: 4,
       yaw: rnd() * 6.28,
+      // Zwłoki wygasłe: pesymistyczne tempo dotyczy zabójstw, a nie ciał leżących
+      // w tej chwili — świeżych jest naraz najwyżej `CORPSE.cap`.
+      diedAtMin: -1,
     });
   }
   for (let i = 0; i < 40; i++) {
@@ -132,12 +135,60 @@ describe('format zapisu', () => {
     expect(back!.flags).toEqual(save.flags);
   });
 
-  it('delty bytów wracają: zabity bez pozycji, ranny z pozycją', () => {
+  it('delty bytów wracają: zabity bez pozycji, ranny z pozycją, zwłoki z czasem', () => {
     const save = emptySave();
-    save.entityDeltas.push({ origin: '3:-7#1', dead: true, hp: 0, x: 12.34, y: 5, z: 4, yaw: 1 });
-    save.entityDeltas.push({ origin: '3:-7#2', dead: false, hp: 7, x: 12.345, y: -5.678, z: 4.2, yaw: 2.7182 });
+    save.entityDeltas.push({
+      origin: '3:-7#1',
+      dead: true,
+      hp: 0,
+      x: 12.34,
+      y: 5,
+      z: 4,
+      yaw: 1,
+      diedAtMin: -1,
+    });
+    save.entityDeltas.push({
+      origin: '3:-7#2',
+      dead: false,
+      hp: 7,
+      x: 12.345,
+      y: -5.678,
+      z: 4.2,
+      yaw: 2.7182,
+      diedAtMin: -1,
+    });
+    save.entityDeltas.push({
+      origin: '3:-7#3',
+      dead: true,
+      hp: 0,
+      x: -8.5,
+      y: 3.25,
+      z: 4.1,
+      yaw: 0.5,
+      diedAtMin: 12345,
+    });
     const wczytane = parse(serialize(save))!.entityDeltas;
-    expect(wczytane[0]).toEqual({ origin: '3:-7#1', dead: true, hp: 0, x: 0, y: 0, z: 0, yaw: 0 });
+    expect(wczytane[0]).toEqual({
+      origin: '3:-7#1',
+      dead: true,
+      hp: 0,
+      x: 0,
+      y: 0,
+      z: 0,
+      yaw: 0,
+      diedAtMin: -1,
+    });
+    // zwłoki: zabity Z pozycją upadku i chwilą śmierci, bo ciało trzeba postawić
+    expect(wczytane[2]).toEqual({
+      origin: '3:-7#3',
+      dead: true,
+      hp: 0,
+      x: -8.5,
+      y: 3.25,
+      z: 4.1,
+      yaw: 0.5,
+      diedAtMin: 12345,
+    });
     // pozycja zabitego jest nieistotna i celowo nie wraca — w pliku jej nie ma
     const ranny = wczytane[1]!;
     expect(ranny.hp).toBe(7);
@@ -202,6 +253,36 @@ describe('budżet zapisu', () => {
         `razem ${(bytes / 1024).toFixed(0)} kB`,
     );
     expect(bytes).toBeLessThan(2 * 1024 * 1024);
+  });
+
+  it('zwłoki leżące w tej chwili kosztują tyle, co nic', () => {
+    // Trup droższy od zwykłej delty zabitego jest tylko dopóki leży: potem wpis
+    // wraca do samego pochodzenia. Płacimy więc za ciała widoczne teraz, a tych
+    // jest najwyżej `CORPSE.cap`.
+    const save = playFor(200);
+    const bez = saveSizeBytes(save);
+    const swieze = 12;
+    for (let i = 0; i < swieze; i++) {
+      save.entityDeltas.push({
+        origin: `-14:${i}#1`,
+        dead: true,
+        hp: 0,
+        x: -28.5 + i,
+        y: 133.25,
+        z: 6.9,
+        yaw: 1.234,
+        diedAtMin: 40000 + i,
+      });
+    }
+    const z = saveSizeBytes(save);
+    console.log(
+      `${swieze} świeżych zwłok: +${z - bez} B (${((z - bez) / swieze).toFixed(1)} B na ciało), ` +
+        `zapis ${(z / 1024).toFixed(0)} kB`,
+    );
+    // Sufit ciał razy koszt ciała ma być poniżej promila limitu — inaczej zwłoki
+    // przestają być ozdobą, a zaczynają być pozycją w budżecie.
+    expect(z - bez).toBeLessThan(2 * 1024 * 1024 * 0.001);
+    expect(z).toBeLessThan(2 * 1024 * 1024);
   });
 
   it('format krotkowy jest wyraźnie mniejszy od obiektowego', () => {
