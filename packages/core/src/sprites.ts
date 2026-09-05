@@ -81,7 +81,16 @@ export function drawSprites(
   cam: Camera,
   ctx: { kv: number; horizon: number; metersPerCell: number; dirX: number; dirY: number; planeX: number; planeY: number },
   list: readonly SpriteInstance[],
-  count: number,
+  /**
+   * Ile pozycji listy rysować. Domyślnie **cała lista** — parametr istnieje dla
+   * buforów prealokowanych, w których długość tablicy nie równa się liczbie bytów.
+   *
+   * Domyślność jest tu poprawką po błędzie, nie wygodą: gra podawała tu liczbę
+   * potworów, a lista niosła potwory **i zwłoki**, więc każde ciało wypadało poza
+   * licznik i nie było malowane nigdy. Wartość domyślna sprawia, że pominięcie
+   * licznika rysuje za dużo, a nie za mało — a za dużo widać od razu.
+   */
+  count: number = list.length,
 ): number {
   const cols = screen.cols;
   const rows = screen.rows;
