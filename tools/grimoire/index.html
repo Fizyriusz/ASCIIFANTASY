@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Grimuar — prototyp rysowanych zaklęć</title>
+<style>
+  :root{
+    --bg:#07090b; --panel:#0d1114; --line:#1c2429; --line2:#2a343b;
+    --ink:#c8d4d8; --dim:#6d7c84; --accent:#4fd6c8; --warn:#ffb454; --bad:#ff6b57; --good:#7ee787;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace;font-size:12px}
+  #app{display:grid;grid-template-columns:auto minmax(400px,1fr);
+       grid-template-rows:auto 1fr auto;gap:1px;height:100%;background:var(--line)}
+  header{grid-column:1/-1;background:var(--panel);padding:8px 12px;display:flex;
+    align-items:center;gap:16px;flex-wrap:wrap}
+  h1{font-size:13px;margin:0;letter-spacing:.18em;color:var(--accent);font-weight:600}
+  .hint{color:var(--dim);font-size:11px}
+  .col{background:var(--panel);overflow:auto;padding:10px 12px;min-height:0}
+  footer{grid-column:1/-1;background:var(--panel);padding:8px 12px;display:flex;
+    gap:8px;flex-wrap:wrap;align-items:center}
+  h2{font-size:11px;letter-spacing:.14em;color:var(--dim);margin:14px 0 6px;
+    font-weight:600;text-transform:uppercase}
+  h2:first-child{margin-top:0}
+  button{background:#141b20;color:var(--ink);border:1px solid var(--line2);padding:4px 9px;
+    font:inherit;cursor:pointer;border-radius:2px}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.on{background:var(--accent);color:#04120f;border-color:var(--accent)}
+  .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+  #page{display:inline-block;border:2px solid #3a3020;background:#0a0806;padding:6px;
+    line-height:1;user-select:none;box-shadow:inset 0 0 40px #00000090}
+  .prow{display:flex}
+  .pc{width:15px;height:15px;display:flex;align-items:center;justify-content:center;
+    font-size:12px;cursor:crosshair}
+  .pc.e{color:#1a1f22}
+  table.t{border-collapse:collapse;font-size:11px;width:100%}
+  table.t td,table.t th{padding:2px 8px 2px 0;text-align:left;color:var(--dim);font-weight:400;
+    vertical-align:top}
+  table.t td.v{color:var(--ink)}
+  table.t td.g{color:var(--good)} table.t td.w{color:var(--warn)} table.t td.b{color:var(--bad)}
+  .note{color:var(--dim);font-size:11px;line-height:1.5;margin:6px 0}
+  .big{font-size:20px;font-weight:600}
+  .good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  label{color:var(--dim)}
+  .know{display:flex;flex-wrap:wrap;gap:4px}
+  .kb{border:1px solid var(--line2);padding:3px 7px;cursor:pointer;border-radius:2px;
+    background:#0a0e11}
+  .kb.on{border-color:var(--good);color:var(--good)}
+  .kb.off{opacity:.45}
+  #topdown{border:1px solid var(--line2);background:#000}
+  textarea{width:100%;height:120px;background:#0a0e11;color:var(--ink);
+    border:1px solid var(--line2);font:inherit;font-size:11px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>GRIMUAR</h1>
+    <span class="hint">prototyp rysowanych zaklęć · kształt = co, pomiar = jak dobrze, glif = żywioł</span>
+  </header>
+
+  <div class="col" id="left">
+    <h2>Żywioł <span class="hint" id="brushInfo"></span></h2>
+    <div class="row" id="elems"></div>
+    <div class="row">
+      <button id="clear">Wyczyść stronę</button>
+      <label>siatka</label>
+      <select id="size">
+        <option value="16">16×16</option>
+        <option value="20" selected>20×20</option>
+        <option value="24">24×24</option>
+        <option value="30">30×30</option>
+      </select>
+      <button id="ex1">przykład: promień</button>
+      <button id="ex2">przykład: krąg</button>
+      <button id="ex3">przykład: rozeta</button>
+    </div>
+
+    <h2>Strona</h2>
+    <div id="page"></div>
+    <p class="note">LPM rysuje, PPM kasuje. Przeciągaj, żeby prowadzić kreskę.</p>
+  </div>
+
+  <div class="col" id="right">
+    <h2>Wiedza postaci <span class="hint">klikaj, żeby zapominać i uczyć się</span></h2>
+    <div class="know" id="knowSigns"></div>
+    <div class="know" id="knowElems" style="margin-top:6px"></div>
+    <p class="note">Znaki i żywioły, których postać nie zna, są <b>martwym atramentem</b>:
+      dokładają kosztu i niestabilności, ale nic nie robią. To jest druga brama — rysować
+      możesz od pierwszej minuty, działać zacznie dopiero, gdy poznasz znaczenie.</p>
+
+    <h2>Odczytane znaki</h2>
+    <div id="signs"></div>
+
+    <h2>Zaklęcie</h2>
+    <div id="spell"></div>
+    <div class="row" style="margin-top:8px;align-items:flex-start">
+      <canvas id="topdown" width="200" height="200"></canvas>
+      <div id="quality" style="flex:1;min-width:200px"></div>
+    </div>
+
+    <h2>Podpowiedzi <span class="hint">tylko znane znaczenia</span></h2>
+    <div id="hints"></div>
+  </div>
+
+  <footer>
+    <button id="expJson">Kopiuj JSON strony</button>
+    <button id="toggleOut">Pokaż/ukryj wyjście</button>
+    <span class="hint" id="status"></span>
+    <textarea id="out" style="display:none"></textarea>
+  </footer>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ============================================================
+   Prototyp rysowanych zaklec.
+
+   Trzy warstwy, zgodnie z ustaleniami:
+     KSZTALT decyduje, CO zaklecie robi (krag = obszar, promien = zasieg...)
+     POMIAR  decyduje, JAK DOBRZE (symetria, gestosc, ciaglosc kreski)
+     GLIF    niesie ZYWIOL (~ lod, * ogien, # kamien, : wiatr, & natura)
+
+   Rozpoznawanie znakow jest LOKALNE i tanie: skladowe spojne, dziury,
+   rozgalezienia, wydluzenie. Zadnego rozpoznawania obrazu.
+   ============================================================ */
+
+const ELEMS = [
+  {ch:'~', id:'lod',    name:'lód',    rgb:'#6fb8ff'},
+  {ch:'*', id:'ogien',  name:'ogień',  rgb:'#ff9440'},
+  {ch:'#', id:'kamien', name:'kamień', rgb:'#b09070'},
+  {ch:':', id:'wiatr',  name:'wiatr',  rgb:'#9fe8d8'},
+  {ch:'&', id:'natura', name:'natura', rgb:'#7ee787'},
+  {ch:'.', id:'obojetny', name:'obojętny', rgb:'#6d7c84'}
+];
+const SIGNS = [
+  {id:'promien', name:'promień',  desc:'długa prosta kreska — wydłuża zasięg'},
+  {id:'krag',    name:'krąg',     desc:'zamknięta pętla — działanie obszarowe'},
+  {id:'rozeta',  name:'rozeta',   desc:'kreski z jednego węzła — liczba celów'},
+  {id:'kropka',  name:'kropka',   desc:'pojedynczy punkt — zagęszcza moc'},
+  {id:'plama',   name:'plama',    desc:'zwarta masa — surowa siła, mało stabilna'}
+];
+
+let N = 20;
+let grid = [];
+let brush = '~';
+let painting = 0;
+const known = { signs:{promien:true, krag:true, rozeta:false, kropka:true, plama:false},
+                elems:{lod:true, ogien:false, kamien:true, wiatr:false, natura:false,
+                       obojetny:true} };
+
+const $ = function(id){ return document.getElementById(id); };
+
+function reset(n){
+  N=n; grid=[];
+  for(let y=0;y<N;y++) grid.push(new Array(N).fill(''));
+}
+reset(20);
+
+/* ---------- rysowanie strony ---------- */
+function colorOf(ch){
+  for(const e of ELEMS) if(e.ch===ch) return e.rgb;
+  return '#c8d4d8';
+}
+function drawPage(){
+  const p=$('page'); p.innerHTML='';
+  for(let y=0;y<N;y++){
+    const row=document.createElement('div'); row.className='prow';
+    for(let x=0;x<N;x++){
+      const c=document.createElement('div');
+      const v=grid[y][x];
+      c.className='pc'+(v?'':' e');
+      c.textContent=v||'·';
+      if(v) c.style.color=colorOf(v);
+      c.onmousedown=function(e){ e.preventDefault();
+        painting=(e.button===2)?2:1;
+        grid[y][x]=(e.button===2)?'':brush; drawPage(); analyse(); };
+      c.onmouseenter=function(){ if(!painting) return;
+        grid[y][x]=painting===2?'':brush; drawPage(); analyse(); };
+      c.oncontextmenu=function(e){ e.preventDefault(); };
+      row.appendChild(c);
+    }
+    p.appendChild(row);
+  }
+}
+document.addEventListener('mouseup', function(){ painting=0; });
+
+/* ---------- skladowe spojne ---------- */
+const N8=[[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]];
+const N4=[[0,-1],[0,1],[-1,0],[1,0]];
+
+function components(){
+  const seen=[];
+  for(let y=0;y<N;y++) seen.push(new Array(N).fill(false));
+  const out=[];
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+    if(!grid[y][x]||seen[y][x]) continue;
+    const cells=[], st=[[x,y]];
+    seen[y][x]=true;
+    while(st.length){
+      const p=st.pop(); cells.push(p);
+      for(const d of N8){
+        const nx=p[0]+d[0], ny=p[1]+d[1];
+        if(nx<0||ny<0||nx>=N||ny>=N) continue;
+        if(!grid[ny][nx]||seen[ny][nx]) continue;
+        seen[ny][nx]=true; st.push([nx,ny]);
+      }
+    }
+    out.push(cells);
+  }
+  return out;
+}
+
+/* Czy skladowa otacza pustke — flood fill tla od brzegu prostokata
+   skladowej; niedosiegnieta pustka w srodku znaczy zamknieta petle. */
+function holesOf(cells){
+  let x0=1e9,y0=1e9,x1=-1,y1=-1;
+  for(const c of cells){ x0=Math.min(x0,c[0]); y0=Math.min(y0,c[1]);
+                         x1=Math.max(x1,c[0]); y1=Math.max(y1,c[1]); }
+  const w=x1-x0+3, h=y1-y0+3;
+  const solid=[]; for(let y=0;y<h;y++) solid.push(new Array(w).fill(false));
+  for(const c of cells) solid[c[1]-y0+1][c[0]-x0+1]=true;
+  const vis=[]; for(let y=0;y<h;y++) vis.push(new Array(w).fill(false));
+  const st=[[0,0]]; vis[0][0]=true;
+  while(st.length){
+    const p=st.pop();
+    for(const d of N4){
+      const nx=p[0]+d[0], ny=p[1]+d[1];
+      if(nx<0||ny<0||nx>=w||ny>=h) continue;
+      if(vis[ny][nx]||solid[ny][nx]) continue;
+      vis[ny][nx]=true; st.push([nx,ny]);
+    }
+  }
+  let holes=0;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++)
+    if(!solid[y][x]&&!vis[y][x]) holes++;
+  return {holes:holes, w:x1-x0+1, h:y1-y0+1, x0:x0, y0:y0, x1:x1, y1:y1};
+}
+
+function neighboursIn(cells,cx,cy){
+  let n=0;
+  for(const d of N8){
+    const nx=cx+d[0], ny=cy+d[1];
+    if(nx<0||ny<0||nx>=N||ny>=N) continue;
+    if(grid[ny][nx]) n++;
+  }
+  return n;
+}
+
+function classify(cells){
+  const b=holesOf(cells);
+  const n=cells.length;
+  const span=Math.max(b.w,b.h);
+  /* Kreska od masy odroznia SREDNIA LICZBA SASIADOW, nie stosunek pol do
+     rozpietosci: przy ksztaltach wieloramiennych liczba pol rosnie z liczba
+     ramion i rozeta wypadala jako plama. Zmierzone: promien 1.85, rozeta 2.54,
+     krag 2.91, gruba kreska 4.56, plama 5.76. Prog 3.2 rozdziela to czysto. */
+  let ends=0, junc=0, degSum=0;
+  for(const c of cells){
+    const d=neighboursIn(cells,c[0],c[1]);
+    degSum+=d;
+    if(d<=1) ends++;
+    if(d>=3) junc++;
+  }
+  const meanDeg = n? degSum/n : 0;
+  const stroke = meanDeg<=3.2;
+  const thin=n/Math.max(1,span);
+  let type;
+  if(n<=2) type='kropka';
+  else if(b.holes>0) type='krag';
+  else if(stroke && ends>=3) type='rozeta';
+  else if(stroke && span>=3) type='promien';
+  else type='plama';
+
+  // zywiol skladowej = dominujacy glif
+  const cnt={};
+  for(const c of cells){ const g=grid[c[1]][c[0]]; cnt[g]=(cnt[g]||0)+1; }
+  let best='', bn=0;
+  for(const g in cnt) if(cnt[g]>bn){ bn=cnt[g]; best=g; }
+  const el=ELEMS.filter(function(e){ return e.ch===best; })[0]||ELEMS[5];
+
+  return { type:type, cells:n, span:span, thin:thin, meanDeg:meanDeg,
+           ends:ends, junc:junc, holes:b.holes, box:b, elem:el,
+           mixed: Object.keys(cnt).length>1 };
+}
+
+/* ---------- pomiar calej strony ---------- */
+function symmetry(){
+  let same=0, tot=0;
+  for(let y=0;y<N;y++) for(let x=0;x<N/2;x++){
+    const a=grid[y][x], b=grid[y][N-1-x];
+    if(a||b){ tot++; if(a===b) same++; }
+  }
+  const hor = tot? same/tot : 1;
+  same=0; tot=0;
+  for(let y=0;y<N/2;y++) for(let x=0;x<N;x++){
+    const a=grid[y][x], b=grid[N-1-y][x];
+    if(a||b){ tot++; if(a===b) same++; }
+  }
+  const ver = tot? same/tot : 1;
+  return { hor:hor, ver:ver, best:Math.max(hor,ver) };
+}
+
+/* ---------- odczyt zaklecia ---------- */
+function analyse(){
+  const comps=components().map(classify);
+  const totalInk=comps.reduce(function(a,c){ return a+c.cells; },0);
+  const sym=symmetry();
+
+  // podzial na czytelne i martwy atrament
+  const live=[], dead=[];
+  comps.forEach(function(c){
+    const okSign=known.signs[c.type], okElem=known.elems[c.elem.id];
+    if(okSign&&okElem) live.push(c); else dead.push(c);
+  });
+  const deadInk=dead.reduce(function(a,c){ return a+c.cells; },0);
+  const deadRatio=totalInk? deadInk/totalInk : 0;
+
+  /* --- tabela znakow --- */
+  let h='<table class="t"><tr><th>znak</th><th>żywioł</th><th>rozmiar</th><th>stan</th></tr>';
+  if(!comps.length) h+='<tr><td colspan="4">pusta strona</td></tr>';
+  comps.forEach(function(c){
+    const okSign=known.signs[c.type], okElem=known.elems[c.elem.id];
+    const ok=okSign&&okElem;
+    const why = ok? 'czytelny'
+      : (!okSign&&!okElem? 'nieznany znak i żywioł'
+        : (!okSign? 'nieznany znak' : 'nieznany żywioł'));
+    h+='<tr><td class="v">'+c.type+'</td>'
+      +'<td style="color:'+c.elem.rgb+'">'+c.elem.name+(c.mixed?' (mieszany)':'')+'</td>'
+      +'<td class="v">'+c.cells+' pól, rozpiętość '+c.span
+      +(c.type==='rozeta'? ', ramion '+c.ends : '')+'</td>'
+      +'<td class="'+(ok?'g':'b')+'">'+why+'</td></tr>';
+  });
+  h+='</table>';
+  $('signs').innerHTML=h;
+
+  /* --- parametry z ksztaltu --- */
+  const rays=live.filter(function(c){ return c.type==='promien'; });
+  const rings=live.filter(function(c){ return c.type==='krag'; });
+  const roses=live.filter(function(c){ return c.type==='rozeta'; });
+  const dots=live.filter(function(c){ return c.type==='kropka'; });
+  const blobs=live.filter(function(c){ return c.type==='plama'; });
+
+  const rangeM = rays.length
+    ? +(rays.reduce(function(a,c){ return Math.max(a,c.span); },0)*1.5).toFixed(1) : 2;
+  const areaM = rings.length
+    ? +(rings.reduce(function(a,c){ return Math.max(a,c.span); },0)*0.35).toFixed(1) : 0;
+  const targets = roses.length
+    ? roses.reduce(function(a,c){ return Math.max(a,c.ends); },0) : 1;
+  const power = 1 + dots.length*0.4 + blobs.reduce(function(a,c){ return a+c.cells*0.05; },0)
+                  + (areaM>0?0.3:0);
+  const elemName = live.length
+    ? live.slice().sort(function(a,b){ return b.cells-a.cells; })[0].elem.name : '—';
+
+  const mixedPenalty = comps.some(function(c){ return c.mixed; }) ? 0.15 : 0;
+  const stability = Math.max(0, Math.min(1,
+    0.35 + 0.45*sym.best - 0.55*deadRatio - mixedPenalty - Math.max(0,(totalInk-90)/300)));
+  const cost = Math.round(totalInk*0.8 + rangeM*1.2 + areaM*3 + targets*2);
+
+  let sh='<table class="t">';
+  sh+='<tr><td>żywioł</td><td class="v">'+elemName+'</td></tr>';
+  sh+='<tr><td>rodzaj</td><td class="v">'
+    +(areaM>0?'obszarowe':(rays.length?'promieniowe':'dotykowe'))+'</td></tr>';
+  sh+='<tr><td>zasięg</td><td class="v">'+rangeM+' m'+(rays.length?'':'  (bez promienia — dotyk)')+'</td></tr>';
+  if(areaM>0) sh+='<tr><td>promień obszaru</td><td class="v">'+areaM+' m</td></tr>';
+  sh+='<tr><td>celów</td><td class="v">'+targets+'</td></tr>';
+  sh+='<tr><td>siła</td><td class="v">×'+power.toFixed(2)+'</td></tr>';
+  sh+='<tr><td>koszt</td><td class="v">'+cost+'</td></tr>';
+  sh+='</table>';
+  $('spell').innerHTML=sh;
+
+  /* --- jakosc --- */
+  let cls,label;
+  if(stability>=0.7){ cls='good'; label='stabilne'; }
+  else if(stability>=0.4){ cls='warn'; label='chwiejne'; }
+  else { cls='bad'; label='niebezpieczne'; }
+  let q='<div class="big '+cls+'">'+Math.round(stability*100)+'%</div>'
+    +'<div class="'+cls+'">'+label+'</div>'
+    +'<table class="t" style="margin-top:6px">'
+    +'<tr><td>symetria</td><td class="v">'+Math.round(sym.best*100)+'% ('
+    +(sym.hor>=sym.ver?'pionowa oś':'pozioma oś')+')</td></tr>'
+    +'<tr><td>atrament</td><td class="v">'+totalInk+' pól</td></tr>'
+    +'<tr><td>martwy atrament</td><td class="'+(deadRatio>0.2?'b':'v')+'">'
+    +Math.round(deadRatio*100)+'%</td></tr>'
+    +'<tr><td>ryzyko odbicia</td><td class="'+(stability<0.4?'b':'v')+'">'
+    +Math.round((1-stability)*100)+'%</td></tr>'
+    +'</table>';
+  if(deadRatio>0){
+    q+='<p class="note">Martwy atrament to znaki, których postać nie rozumie — '
+      +'dokładają kosztu i chwieją zaklęciem, ale nic nie robią.</p>';
+  }
+  $('quality').innerHTML=q;
+
+  drawTopDown(rangeM, areaM, targets, stability);
+}
+
+/* ---------- schemat dzialania z gory ---------- */
+function drawTopDown(rangeM, areaM, targets, stab){
+  const cv=$('topdown'), x=cv.getContext('2d');
+  x.fillStyle='#000'; x.fillRect(0,0,200,200);
+  const maxM=Math.max(6, rangeM+areaM+1);
+  const s=85/maxM;
+  const cxp=100, cyp=170;
+  // siatka odleglosci
+  x.strokeStyle='#1c2429';
+  for(let m=2;m<=maxM;m+=2){
+    x.beginPath(); x.arc(cxp,cyp,m*s,Math.PI,2*Math.PI); x.stroke();
+  }
+  // zasieg
+  x.strokeStyle='#4fd6c8'; x.lineWidth=1.5;
+  x.beginPath(); x.moveTo(cxp,cyp); x.lineTo(cxp,cyp-rangeM*s); x.stroke();
+  // obszar
+  if(areaM>0){
+    x.strokeStyle=stab>=0.4?'#ffb454':'#ff6b57';
+    x.beginPath(); x.arc(cxp,cyp-rangeM*s,areaM*s,0,6.3); x.stroke();
+  }
+  // cele
+  x.fillStyle='#c8d4d8';
+  for(let i=0;i<Math.min(targets,6);i++){
+    const a=-Math.PI/2 + (i-(Math.min(targets,6)-1)/2)*0.35;
+    x.beginPath();
+    x.arc(cxp+Math.cos(a)*rangeM*s, cyp+Math.sin(a)*rangeM*s, 2.5, 0, 6.3);
+    x.fill();
+  }
+  // rzucajacy
+  x.fillStyle='#4fd6c8';
+  x.beginPath(); x.arc(cxp,cyp,3.5,0,6.3); x.fill();
+  x.fillStyle='#6d7c84'; x.font='9px monospace'; x.textAlign='center';
+  x.fillText('rzucający',cxp,cyp+16);
+  x.fillText(maxM.toFixed(0)+' m',cxp,20);
+  x.textAlign='left';
+}
+
+/* ---------- wiedza ---------- */
+function drawKnow(){
+  const s=$('knowSigns'); s.innerHTML='<span class="hint" style="width:100%">znaki:</span>';
+  SIGNS.forEach(function(sg){
+    const b=document.createElement('div');
+    b.className='kb '+(known.signs[sg.id]?'on':'off');
+    b.textContent=sg.name;
+    b.onclick=function(){ known.signs[sg.id]=!known.signs[sg.id];
+      drawKnow(); analyse(); };
+    s.appendChild(b);
+  });
+  const e=$('knowElems'); e.innerHTML='<span class="hint" style="width:100%">żywioły:</span>';
+  ELEMS.forEach(function(el){
+    const b=document.createElement('div');
+    b.className='kb '+(known.elems[el.id]?'on':'off');
+    b.textContent=el.name;
+    b.style.borderColor=known.elems[el.id]?el.rgb:'';
+    b.onclick=function(){ known.elems[el.id]=!known.elems[el.id];
+      drawKnow(); analyse(); };
+    e.appendChild(b);
+  });
+  drawHints();
+}
+function drawHints(){
+  let h='<table class="t">';
+  let any=false;
+  SIGNS.forEach(function(sg){
+    if(!known.signs[sg.id]) return;
+    any=true;
+    h+='<tr><td class="v">'+sg.name+'</td><td>'+sg.desc+'</td></tr>';
+  });
+  if(!any) h+='<tr><td>postać nie zna jeszcze żadnego znaku</td></tr>';
+  h+='</table>';
+  $('hints').innerHTML=h;
+}
+
+/* ---------- pedzel ---------- */
+function drawElems(){
+  const e=$('elems'); e.innerHTML='';
+  ELEMS.forEach(function(el){
+    const b=document.createElement('button');
+    b.textContent=el.ch+'  '+el.name;
+    b.className=brush===el.ch?'on':'';
+    b.style.color=brush===el.ch?'#04120f':el.rgb;
+    b.onclick=function(){ brush=el.ch; drawElems(); };
+    e.appendChild(b);
+  });
+  $('brushInfo').textContent='pędzel: '+brush;
+}
+
+/* ---------- przyklady ---------- */
+function ex(kind){
+  reset(N); drawPage();
+  const c=Math.floor(N/2);
+  if(kind===1){
+    for(let y=c-6;y<=c+6;y++) if(y>=0&&y<N) grid[y][c]=brush;
+  } else if(kind===2){
+    const r=Math.min(6,c-2);
+    for(let a=0;a<360;a+=4){
+      const x=Math.round(c+Math.cos(a*Math.PI/180)*r);
+      const y=Math.round(c+Math.sin(a*Math.PI/180)*r);
+      if(x>=0&&y>=0&&x<N&&y<N) grid[y][x]=brush;
+    }
+  } else {
+    for(let i=0;i<5;i++){
+      const a=i*72*Math.PI/180;
+      for(let t=1;t<=5;t++){
+        const x=Math.round(c+Math.cos(a)*t), y=Math.round(c+Math.sin(a)*t);
+        if(x>=0&&y>=0&&x<N&&y<N) grid[y][x]=brush;
+      }
+    }
+    grid[c][c]=brush;
+  }
+  drawPage(); analyse();
+}
+$('ex1').onclick=function(){ ex(1); };
+$('ex2').onclick=function(){ ex(2); };
+$('ex3').onclick=function(){ ex(3); };
+$('clear').onclick=function(){ reset(N); drawPage(); analyse(); };
+$('size').onchange=function(){ reset(+$('size').value); drawPage(); analyse(); };
+
+$('expJson').onclick=function(){
+  const rows=grid.map(function(r){ return r.map(function(c){ return c||' '; }).join(''); });
+  const t=JSON.stringify({size:N, page:rows, known:known}, null, 2);
+  const o=$('out'); o.style.display='block'; o.value=t; o.select();
+  try{ document.execCommand('copy'); }catch(e){}
+  $('status').textContent='skopiowane';
+  setTimeout(function(){ $('status').textContent=''; },2000);
+};
+$('toggleOut').onclick=function(){
+  const o=$('out'); o.style.display=o.style.display==='none'?'block':'none';
+};
+
+drawElems(); drawKnow(); drawPage(); analyse();
+})();
+</script>
+</body>
+</html>
