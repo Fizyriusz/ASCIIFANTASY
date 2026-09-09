@@ -29,6 +29,20 @@ dodatkowej decyzji.
 **Liczba:** brak — to rozstrzygnięcie zakresu, nie pomiaru.
 Źródło: `docs/zadania/M3g-ataki-jako-dane.md` §Rozstrzygnięcie.
 
+### Jakość ciosu liczona od marginesu sukcesu — M3e
+
+**Na rzecz:** jakości **wyśrodkowanej na szansie trafienia**
+(`clamp(p + (0,5 − rzut), grazeDamage, 1)`).
+
+**Argument:** pierwsza wersja liczyła jakość jako `grazeDamage + (1 − grazeDamage) ·
+(p − rzut)/p`, czyli podłoga muśnięcia obowiązywała wszystkie nieudane rzuty i zjadała
+różnicę między nowicjuszem a wprawnym. Umiejętność miała zostać tak samo ważna jak
+w modelu z pudłem, tylko przenieść się z bramki na skalę.
+
+**Liczby:** ostrze 10 → 80 dawało **+19%** średnich obrażeń w wersji odrzuconej wobec
+**+43%** w przyjętej; dawny model z pudłem dawał +69% ciosów, które w ogóle dochodziły.
+Źródło: `docs/architektura.md` §6, `packages/rules/src/combat.ts`.
+
 ### Rzut na trafienie jako bramka zamiast skali — M3e
 
 **Na rzecz:** rzut decydujący o **sile** ciosu (od muśnięcia do czystego trafienia);
@@ -192,10 +206,13 @@ sensowny widok na pustkowiu nie mieści się w budżecie. Pomiar z M1 §7 pokaza
 mieści, więc druga warstwa marszu (i druga generacja terenu pod nią) byłaby złożonością
 bez problemu do rozwiązania.
 
-**Liczba:** budżet **8 ms** na scenę; pomiar zasięgu z M1 §7 zmieścił się poniżej.
-Dokładna tabela — **uzasadnienie poza repo**: w repozytorium został wniosek
-(`docs/zadania/README.md`: „niepotrzebny (pomiar M1 §7)"), ale nie same liczby.
-Źródło: `docs/zadania/M1b-lod-sylwetkowy.md`, `docs/zadania/README.md`.
+**Liczby:** przy zasięgu 400 m najgorsza z mierzonych scen (grzbiet z widokiem na
+dolinę) kosztowała **3,81 ms** przy budżecie 8 ms — mniej niż połowa. Powód jest
+strukturalny: kolumna kończy marsz, gdy fronty się spotkają, więc wydłużenie zasięgu
+dokłada koszt tylko tam, gdzie niebo sięga nisko nad horyzont. Prawdziwy koszt zasięgu
+siedzi gdzie indziej — w strumieniowaniu: pierścień o promieniu 4 to 81 chunków,
+**313 ms** generacji rozłożonej na 81 klatek i około 18 MB pamięci.
+Źródło: `docs/zadania/M1-teren-i-chunki.md` §7, `docs/zadania/M1b-lod-sylwetkowy.md`.
 
 ### Minimalne oświetlenie otoczenia w lochu — M2
 

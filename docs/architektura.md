@@ -483,8 +483,23 @@ dają ten sam obraz.
 
 ### 4.1 Czas
 
-1 minuta gry = 1 tick. Domyślnie 1 s realny = 6 minut gry (dostrajalne). Pory dnia
-sterują harmonogramami, spawnami i światłem. Doba = 1440 ticków.
+1 minuta gry = 1 tick, doba = 1440 ticków. Pory dnia sterują harmonogramami, spawnami
+i światłem.
+
+**Zegar gry idzie 180× szybciej od realnego**: doba trwa `DAY_SECONDS` = 480 sekund
+realnych, więc jedna minuta zegara to **0,33 sekundy realnej**, a jedna sekunda realna
+to trzy minuty gry. (Wcześniejszy zapis tej sekcji mówił o sześciu minutach na sekundę
+— nie zgadzał się z kodem.)
+
+**Każda stała podawana w minutach zegara musi mieć w komentarzu przelicznik na czas
+realny.** Pierwsza wersja okna zwłok brzmiała „kilka minut gry" i znaczyła sekundę.
+
+Zegar zapisu jest **monotonicznym licznikiem minut od startu partii**, a nie porą dnia;
+pora dnia jest z niego wyliczana (`(clockMin / 1440) % 1`), nie odwrotnie. Poprzednia
+wersja zapisywała `dayPhase * 1440`, czyli porę dnia — i to był błąd, który wyszedł
+dopiero przy zwłokach: `dayPhase` zawija się co dobę, więc różnica „teraz minus chwila
+śmierci" po północy wychodziła **ujemna** i ciało byłoby świeże już zawsze. Przy okazji
+zapis wreszcie pamięta, ile dni trwa partia.
 
 ### 4.2 Trzy poziomy szczegółu
 
@@ -632,10 +647,28 @@ a cofający się byt wyglądał, jakby dawał się przepychać chodzeniem.
 **Rzut decyduje o sile ciosu, nie o jego istnieniu.** Cios, który przeszedł geometrię
 i nie został zablokowany ani ominięty unikiem, **dochodzi zawsze**; ten sam jeden rzut
 (`baza + umiejętność + zręczność − obrona`, klamrowany do 5–95%) przelicza się na jakość
-trafienia: od muśnięcia (`COMBAT.grazeDamage`, 25% obrażeń) po czysty cios. Skala jest
-tak zbudowana, że średnia jakość równa się szansie trafienia, więc strojenie tempa walki
-z M3b zostaje w mocy, a umiejętność działa tak samo mocno jak wcześniej — tylko na skali
-zamiast w bramce (ostrze 10 → 80 to +43% średnich obrażeń ciosu).
+trafienia: od muśnięcia (`COMBAT.grazeDamage`, 25% obrażeń) po czysty cios.
+
+Kształt skali jest jedną linijką i ma znaczenie:
+
+```
+jakość = clamp(szansaTrafienia + (0,5 − rzut),  grazeDamage,  1)
+```
+
+Jakość jest **wyśrodkowana na szansie trafienia**, więc średnia jakość ciosu równa się
+tej szansie. To jest cała sztuczka: dawne `p` mówiło, jaki ułamek ciosów przechodzi
+w całości, dziś mówi, jaki ułamek obrażeń przechodzi średnio — a skoro średnia się nie
+zmienia, całe strojenie tempa walki z M3b zostaje w mocy bez ruszania obrażeń bazowych.
+Umiejętność wchodzi przez `hitChance`, czyli tak samo mocno jak wcześniej, tylko na
+skali zamiast w bramce: ostrze 10 → 80 to **+43%** średnich obrażeń ciosu.
+
+Pierwsza wersja tej skali liczyła jakość od **marginesu sukcesu** (`grazeDamage +
+(1 − grazeDamage) · (p − rzut)/p`) i została odrzucona pomiarem: podłoga muśnięcia
+obowiązywała wtedy wszystkie nieudane rzuty, więc zjadała różnicę między nowicjuszem
+a wprawnym. Ostrze 10 → 80 dawało w niej **+19%** średnich obrażeń zamiast +43%, przy
+dawnym modelu z pudłem wartym +69% ciosów, które w ogóle dochodziły. Wersja
+wyśrodkowana trzyma tempo (mediana 10 000 pojedynków 5,3 s wobec 5,1 s przed zmianą)
+i wagę umiejętności naraz.
 
 **Zasada, z której to wynika: jedynymi powodami zerowych obrażeń mają być powody, które
 gracz WIDZI** — blok, unik, brak zasięgu. Kości produkujące niewidzialne zera to ta sama
@@ -961,6 +994,62 @@ Termin przyszedł wcześniej niż zakładany M4, bo mieszkaniec lochu psuł to m
 niż byt na łące: wystarczyło, żeby wyszedł za graczem do korytarza, a po wczytaniu
 jego komora rodziła drugi komplet.
 
+### 10.7 Generacja chunka: 15–18 ms przy limicie 8 ms — **opisane, nie naprawione**
+
+Stan: `pnpm bench world` daje **15,4 ms** na chunk pustkowia i **18,1 ms** na chunk
+z lochem, przy limicie **8 ms** z `CLAUDE.md`. Ten wpis jest analizą, nie planem
+optymalizacji — bo zanim cokolwiek przyspieszymy, trzeba wiedzieć, czy problemem jest
+kod, czy liczba.
+
+**Czy to regresja, czy narastanie?** Narastanie. Ostatni pomiar w budżecie jest z M1:
+81 chunków pierścienia o promieniu 4 kosztowało **313 ms**, czyli **3,9 ms na chunk**.
+Między M1 a dziś chunk dostał trzy warstwy, wszystkie potrzebne i wszystkie płacone
+przy generacji: wycinanie lochu i schodów (M2), flood fill światła statycznego po
+komórkach (M2, §3.3) oraz stabilną fakturę z M1c. Żaden pojedynczy commit nie zrobił
+tego skoku — zrobiła go suma. Czterokrotność między 3,9 a 15,4 ms nie ma jednego
+winnego i dlatego nie ma jednej poprawki.
+
+**Czy 8 ms było realnym limitem?** Nie. Ta liczba pochodzi z M0, gdzie znaczyła coś
+innego: „`renderWorld` dla sceny referencyjnej < 8 ms (p95)", czyli **połowę budżetu
+klatki**. W M1 została przepisana do DoD jako `generateChunk < 8 ms` i stamtąd trafiła
+do tabeli budżetów w `CLAUDE.md`. Nikt jej nie wyprowadził ze strumieniowania — jest
+odziedziczona, nie uzasadniona.
+
+**Co jest realnym ograniczeniem.** `ChunkStore.update` generuje **najwyżej jeden chunk
+na klatkę** (najbliższy brakujący), więc każde wejście w nowy chunk to jedna klatka
+dłuższa o czas generacji. Przy 60 fps klatka ma 16,7 ms, więc 15–18 ms to **zgubiona
+klatka na chunk**, a nie „przekroczony budżet o 90%". Pomiar `wild.bench` „update
+podczas marszu" pokazuje to wprost: mediana 4,1 ms, ale p99 **64 ms** — czyli zacinka
+widoczna gołym okiem, dokładnie wtedy, gdy pierścień dociąga nowy chunk.
+
+**Właściwa naprawa jest więc dwuczęściowa i żadna z części nie jest optymalizacją pod
+liczbę:**
+
+1. **Zmienić limit na wyprowadzony**, a nie odziedziczony. Sensowne sformułowanie:
+   „generacja chunka nie może wydłużyć żadnej klatki powyżej progu zacinki" — co przy
+   jednym chunku na klatkę znaczy albo budżet rzędu 6–8 ms (wtedy 8 ms jest przypadkiem
+   trafione), albo rozłożenie generacji na kilka klatek i wtedy limit dotyczy **raty**,
+   nie całości.
+2. **Dopiero potem** patrzeć, co w generacji jest drogie — i mierzyć, zamiast zgadywać,
+   bo trzy warstwy są tu podejrzane po równo.
+
+Termin: **przed M4.** Miasteczko dokłada do chunka budynki i mieszkańców, więc wejście
+w M4 z nieuzasadnionym limitem znaczy, że pierwsza zacinka zostanie zdiagnozowana
+z tym samym pytaniem, co dziś.
+
+### 10.8 Rodzaj bytu nie jest zapisany w delcie — **spłata w M3c**
+
+Ciało odtwarzane z delty dostaje `kind = 0`, bo delta niesie pochodzenie, pozycję,
+hp i czas śmierci, ale nie rodzaj stworzenia. Dziś jest to poprawne przez przypadek:
+goblin jest jedynym stworzeniem w paczce, a `instantiate` robi goblina dla każdego
+pochodzenia — więc błąd jest niewidoczny.
+
+Wybuchnie przy drugim gatunku, czyli w M3c: wilk zabity i minięty wróci jako goblin.
+Spłata jest tania, ale ma dwa warianty i wybór należy do M3c: albo rodzaj idzie do
+delty (~2 B na wpis, wprost), albo wyprowadzamy go z pochodzenia tym samym haszem,
+który go stworzył (0 B, ale wiąże format delty z generatorem). Wpis istnieje po to,
+żeby ta decyzja została podjęta świadomie, a nie odkryta przez gracza.
+
 ### 10.3 Wejście do jaskini jest kompozycją, nie emergentne — do rewizji w M4
 
 Wcięcie wejściowe ma zapisaną długość ramion, zakręt, nachylenie i pas obrzeża
@@ -988,6 +1077,14 @@ Dwa etapy, rozdzielone wolumenem tekstu:
 1. **Wyciągnięcie napisów do `locale/` — przed M4.** Jest tanie, bo dziś napisów jest
    kilkadziesiąt, i domyka konwencję z `CLAUDE.md`: napis to dana z limitem długości,
    bo siatka znaków ma stałą szerokość.
+
+   **Licznik długu, żeby rósł widocznie** (stan po M3e): `apps/game/src/main.ts` ma
+   **15** wpisów do dziennika i 20 napisów widocznych dla gracza, `packages/ui`
+   — 74 (`panels.ts` 37, `panel.ts` 17, `self.ts` 11, `index.ts` 6, `log.ts` 3).
+   Ostatnia runda dołożyła trzy: „cios w powietrze — nad celem", „cios w powietrze —
+   obok celu" i „muśnięcie", a zabrała jeden („pudło"), bo pudło przestało istnieć.
+   Zwłoki **nie dołożyły żadnego** — ciało mówi obrazem, nie tekstem, i tak ma zostać.
+   Przy każdej kolejnej rundzie ta liczba idzie w górę, a koszt spłaty razem z nią.
 2. **Machineria odmiany — dopiero przy questach (M5).** Szablony **całych zdań** per
    język, rzeczowniki z przypadkami jako dane. Wcześniej nie ma na czym tego sprawdzić:
    wolumen pojawia się razem z generowanymi questami.
