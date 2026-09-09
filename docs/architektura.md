@@ -111,20 +111,110 @@ interface SaveFile {
 
 Zapis po 200 h gry powinien mieć < 2 MB. Jeśli rośnie szybciej — coś zapisujemy niepotrzebnie.
 
-**Stan po M3d** (`packages/world/src/save.ts`, `SAVE_VERSION = 2`). Działa: seed, zegar,
-pełny stan gracza z plecakiem, delty komórek, byty **z pochodzeniem** i flagi. Nie ma jeszcze frakcji ani questów — wejdą
+**Stan po M3e** (`packages/world/src/save.ts`, `SAVE_VERSION = 4`). Działa: seed, zegar,
+pełny stan gracza z plecakiem, delty komórek, byty żywe w chwili zapisu, **delty bytów
+zwolnionych** (§2.3a) i flagi. Nie ma jeszcze frakcji ani questów — wejdą
 z M4 i M5, jako kolejne pola i podbicie `SAVE_VERSION`.
 
 Format na dysku jest **krotkowy**: span leży jako `[bottom, top, mat, capMat, flags]`,
-a delty jako lista par, nie obiekt. Powód jest zmierzony: przy 11 990 deltach
-z syntetycznych 200 godzin gry wychodzi **483 kB zamiast 1319 kB**, czyli 41 bajtów
-na deltę zamiast 113. Nazwy pól powtórzone przy każdym spanie kosztują tu więcej
-niż same liczby.
+delty komórek jako lista par, delta bytu w trzech długościach: `[pochodzenie]` (zabity
+bez zwłok), `[pochodzenie, hp, x, y, z, yaw]` (ranny) i `[pochodzenie, 0, x, y, z, yaw,
+czas śmierci]` (zabity, po którym leży ciało). Powód jest zmierzony na 200 godzinach syntetycznej
+gry: **832 kB w krotkach zamiast 2697 kB w obiektach**. Sama zamiana delt bytów
+z obiektów na krotki to 29,7 B zamiast 117,5 B na wpis — przy 12 000 wpisów różnica
+między 832 kB a 1861 kB, czyli między zapasem a jego brakiem w limicie 2 MB.
+
+Pozycja zabitego bytu idzie do pliku tylko dopóki leżą po nim zwłoki — potem jest
+nieistotna i wpis wraca do samego pochodzenia. Pozycje zaokrąglamy do centymetra,
+a zwrot do tysięcznej radiana. Rozdzielczość ponad tę nie jest
+widoczna w grze, a w pliku kosztuje kilkanaście bajtów na wpis.
 
 `parse` zwraca `null` zamiast rzucać, a klucz delty o złym kształcie jest pomijany:
 źródłem jest `localStorage` albo plik od gracza, więc może być czymkolwiek. Gra ma
 wtedy zacząć nową partię, a nie się wywalić — i na pewno nie nadpisać przypadkowej
 komórki.
+
+### 2.3a Cykl życia bytów (M3e)
+
+Byt istnieje **tylko w pierścieniu wokół gracza**. Poza nim nie ma go w symulacji — nie
+chodzi sobie dalej, nie je, nie wędruje; wróci, gdy gracz wróci, i będzie taki sam.
+Liczby są w `packages/content` (`WILD_SPAWN`): promień życia 48 komórek, promień
+zwolnienia 72 komórki (histereza, żeby byt na granicy nie migotał), sufit **24 byty
+w pierścieniu**.
+
+Sufit dotyczy pierścienia, nie listy — i to jest cała lekcja z M3d. Poprzedni sufit
+`MAX_BEINGS = 64` liczył całą listę, a że byt raz wstawiony nigdy nie był zwalniany,
+to po ośmiu kilometrach marszu lista dobijała do sufitu i świat przestawał rodzić byty
+**wszędzie i do końca sesji**: pomiar dawał 0 bytów w pierścieniu po 1,3, 7,9 i 31,7 km.
+Drugą połową tego samego błędu był zbiór `seen` rosnący monotonicznie — klaster raz
+rozpatrzony nie wracał do puli, więc powrót w to samo miejsce zastawał pustkę.
+
+Co zostaje po bycie zwolnionym, zależy od tego, czy gracz go dotknął:
+
+| stan bytu | co zostaje |
+|---|---|
+| nietknięty | **nic** — przy powrocie odtworzy się z hasza taki sam |
+| ranny albo przesunięty | delta z hp i pozycją |
+| zabity | delta „to pochodzenie jest puste" — zabity zostaje zabity |
+
+Wariant „nietknięty też zostaje" był rozważony i odrzucony pomiarem: gracz mija setki
+bytów, więc zapisywanie każdego minięcia zamienia zapis w dziennik podróży. Przy 12 000
+delt na 200 h to już 348 kB; przy jednej delcie na każdy widziany byt limit 2 MB padłby
+w kilkanaście godzin gry.
+
+Pochodzenie bytu (`"kx:ky#i"` na powierzchni, `"poi:komora#i"` w lochu) jest **funkcją
+seeda i miejsca**, nigdy kolejności odwiedzin ani licznika instancji. Bez tego powrót
+z drugiej strony dawałby inny świat, a delta trafiałaby w cudze pochodzenie.
+
+Zmierzone (`tools/harness/src/life.test.ts`, `life.bench.ts`):
+
+- bytów w pierścieniu, mediana z trzech tras: **9 po 1 km, 10 po 10 km, 8 po 30 km**
+  (kryterium odbioru: rozjazd poniżej 40%),
+- droga powrotna po 2 km: 90 bytów; po zabiciu jednego 89, różnica dokładnie o to jedno
+  pochodzenie,
+- koszt klatki: **0,027 ms p99** na stojąco, 0,028 ms w biegu (budżet 0,3 ms).
+
+**Zwłoki są rekordem, nie bytem** (M3e). Zabity byt schodzi z listy bytów, gdy zgaśnie
+rozbłysk ostatniego ciosu — a nie od razu, bo ten rozbłysk jest ostatnim kadrem
+sprzężenia zwrotnego, które gracz dostaje za zabicie. Zostaje po nim `Corpse`: pozycja,
+rodzaj, zwrot, jasność i minuta śmierci. Ciało rysuje się klatką `Death` (rysunek jest
+kupką przy ziemi, więc trup leży, a nie stoi) i to jest **wszystko**, co robi: nie ma
+postawy, AI ani miejsca w kolizji.
+
+Rozstrzygnięcie „rekord, nie byt" jest zmierzone, a nie estetyczne. Sufit pierścienia to
+24 byty przy typowym zaludnieniu 9–10, więc kilkanaście trupów w jednym miejscu
+zatrzymywałoby rodzenie nowych w okolicy — czyli wracałby w miniaturze błąd, od którego
+zaczęło się to zadanie. Kolizji trup i tak nie zajmował (`occupied` pomija `Dead` od M3b),
+więc bycie bytem nie dawało mu ani jednej używanej właściwości.
+
+Ciało żyje `CORPSE.minutes` minut zegara gry, a wygaśnięcie sprawdzamy **wyłącznie przy
+wejściu w pierścień**: trup, na który patrzysz, nie ma prawa wyparować w kadrze. Ponad
+`CORPSE.cap` ciał w pierścieniu najstarsze wygasa **na dobre** — zdjęte ciało, które
+wraca po chwili, byłoby gorsze od obu wariantów. Sufit jest zaworem: przemiar szesnastu
+miejsc dał 4–15 bytów w pierścieniu, więc na typowej łące nie ma kogo zabić tyle razy.
+
+Koszt zapisu (zmierzony): świeże zwłoki to `[pochodzenie, 0, x, y, z, zwrot, czas]`
+i **43,2 B**, wobec 14 B samego „zabity". Po oknie wpis wraca do krótkiej postaci, więc
+płacimy tylko za ciała leżące w tej chwili: pełny sufit to **518 B**, czyli 0,03% limitu
+2 MB. Wariant „trup leży wiecznie" kosztowałby +348 kB na 200 h gry i został odrzucony
+tą liczbą, a nie gustem.
+
+**Zegar gry idzie 180× szybciej od realnego.** Doba trwa `DAY_SECONDS` = 480 sekund
+realnych, więc minuta zegara to 0,33 sekundy realnej. **Każda stała podawana w minutach
+zegara musi mieć w komentarzu przelicznik na czas realny** — pierwsza wersja okna zwłok
+brzmiała „kilka minut gry" i znaczyła sekundę. `CORPSE.minutes` = 540 to trzy minuty
+realne, czyli dziewięć godzin w świecie.
+
+Zegar zapisu jest przy okazji **monotoniczny**, a nie porą dnia: `dayPhase` zawija się co
+dobę, więc różnica dwóch odczytów potrafi wyjść ujemna — a na takiej różnicy stoi
+wygasanie zwłok. Pora dnia jest liczona z zegara, nie odwrotnie.
+
+Na powierzchni grunt czytamy **z komórki kandydata**, bez pułapu liczonego od gracza.
+Pułap `pz + 3` wszedł w M3, żeby byty nie lądowały na łące nad lochem, ale od M3d
+podziemia mają własną ścieżkę (§3.3a), a na powierzchni odrzucał każdego kandydata
+wyżej niż trzy metry nad graczem — i klaster przepadał na zawsze, bo był już oznaczony
+jako rozpatrzony. Ryzyko zamienne, czyli byty na niedostępnych półkach skalnych,
+zmierzone: **0 z 25** bytów stoi w komórce, z której nie da się zejść.
 
 ---
 
@@ -393,8 +483,23 @@ dają ten sam obraz.
 
 ### 4.1 Czas
 
-1 minuta gry = 1 tick. Domyślnie 1 s realny = 6 minut gry (dostrajalne). Pory dnia
-sterują harmonogramami, spawnami i światłem. Doba = 1440 ticków.
+1 minuta gry = 1 tick, doba = 1440 ticków. Pory dnia sterują harmonogramami, spawnami
+i światłem.
+
+**Zegar gry idzie 180× szybciej od realnego**: doba trwa `DAY_SECONDS` = 480 sekund
+realnych, więc jedna minuta zegara to **0,33 sekundy realnej**, a jedna sekunda realna
+to trzy minuty gry. (Wcześniejszy zapis tej sekcji mówił o sześciu minutach na sekundę
+— nie zgadzał się z kodem.)
+
+**Każda stała podawana w minutach zegara musi mieć w komentarzu przelicznik na czas
+realny.** Pierwsza wersja okna zwłok brzmiała „kilka minut gry" i znaczyła sekundę.
+
+Zegar zapisu jest **monotonicznym licznikiem minut od startu partii**, a nie porą dnia;
+pora dnia jest z niego wyliczana (`(clockMin / 1440) % 1`), nie odwrotnie. Poprzednia
+wersja zapisywała `dayPhase * 1440`, czyli porę dnia — i to był błąd, który wyszedł
+dopiero przy zwłokach: `dayPhase` zawija się co dobę, więc różnica „teraz minus chwila
+śmierci" po północy wychodziła **ujemna** i ciało byłoby świeże już zawsze. Przy okazji
+zapis wreszcie pamięta, ile dni trwa partia.
 
 ### 4.2 Trzy poziomy szczegółu
 
@@ -503,18 +608,28 @@ która zna pozycje (`serviceSwing`) — reguły walki nie znają geometrii.
 **Trafienie jest celowane, ale bez stref ciała** (M3f). Warunek dojścia ciosu czyta
 trzy rzeczy: odległość poziomą, łuk w poziomie (`COMBAT.swingArcRad`, 0,55 rad — węższy
 niż połowa pola widzenia, żeby nie dało się trafić czegoś poza ekranem) oraz **okno
-pionowe**. Sylwetka celu zajmuje przedział kątów, nie punkt, więc porównujemy przedział
-z przedziałem i rozszerzamy go o margines z contentu. Przy 2 m goblin zajmuje od −8,5°
-(czubek głowy) do −40,4° (stopy), co znaczy, że patrzenie poziomo przed siebie **go mija**
-— i to jest cała reguła: trzeba patrzeć na przeciwnika, a wysokość bytu zaczyna mieć
-znaczenie (na wilka niżej niż na trolla).
+pionowe**. Sylwetka celu zajmuje przedział wysokości, nie punkt, więc porównujemy
+przedział z przedziałem, a margines z contentu jest **w metrach** (`COMBAT.aimMarginM`,
+0,5 m nad głową i pod stopami) i wchodzi do przedziału **przed** policzeniem kąta.
+
+Margines był początkowo kątem (8°) i to był błąd wart zapisania, bo wyglądał na
+kosmetykę, a nie na model. Ten sam kąt znaczy co innego z bliska niż z daleka — przy
+0,6 m osiem stopni to 8 cm, przy 3 m 42 cm — a walka wręcz dzieje się właśnie z bliska.
+Goblin ma 1,4 m, oko gracza 1,7 m, więc w zwarciu cel jest **zawsze pod horyzontem**:
+pomiar stu ciosów w nieruchomy cel dał 100% chybień „poza pionem" przy poziomym
+patrzeniu, na każdym z trzech dystansów broni. W metrach to samo pół metra daje okno
+do +18,4° przy 0,6 m, +10,8° przy 1,05 m i +5,6° przy 2,05 m — poziome patrzenie
+w zwarciu trafia zawsze, a cel wysoko nad głową nadal wymaga zadarcia jej.
 
 Po stronie AI kąt patrzenia niczego by nie ograniczał, bo byt celuje w środek sylwetki,
 więc tam rozstrzyga **pionowy zasięg ciosu** (`COMBAT.verticalReachM`). To jest warunek,
 przez który byt z przęsła mostu nie dosięga tego pod spodem — i odwrotnie.
 
-Koszt zmierzony ścieżką gry: gracz celujący w przeciwnika traci **0%** ciosów nawet przy
-rozrzucie ±20°; gracz patrzący poziomo przed siebie traci 100%.
+Rysunek i reguły muszą mówić to samo, i to jest sprawdzane pomiarem: pasmo kątów,
+w którym sprite goblina zakrywa celownik, mieści się w całości w oknie trafienia
+(przy 1,05 m sprite od −51° do −24°, okno od −64,5° do +10,8°). Koszt zmierzony ścieżką
+gry: **0%** straconych ciosów przy celowaniu w sylwetkę nawet z rozrzutem ±20°
+i **0%** przy patrzeniu poziomo przed siebie.
 
 **Każdy zamach kończy się wynikiem.** `serviceSwing` zwraca `Swing`: rozstrzygnięty,
 poza zasięgiem albo poza łukiem ciosu — nigdy cicho. Wcześniej cios poza zasięgiem
@@ -529,10 +644,51 @@ się w trakcie własnego ciosu ani dłużej niż `COMBAT.retreatMs`.
 gracz wchodził w potwora (zmierzone 0,00 m dystansu po dziesięciu sekundach nacierania),
 a cofający się byt wyglądał, jakby dawał się przepychać chodzeniem.
 
-**Trafienie to jeden rzut**: `baza + umiejętność + zręczność − obrona`, klamrowany
-do 5–95%. Blok redukuje obrażenia i zjada wytrzymałość proporcjonalnie do tego, co
-zatrzymał — i pęka, gdy jej zabraknie. Unik ma krótkie okno i dłuższe odbicie, więc
-unik w ciemno jest gorszy niż unik w odpowiedzi na zamach.
+**Rzut decyduje o sile ciosu, nie o jego istnieniu.** Cios, który przeszedł geometrię
+i nie został zablokowany ani ominięty unikiem, **dochodzi zawsze**; ten sam jeden rzut
+(`baza + umiejętność + zręczność − obrona`, klamrowany do 5–95%) przelicza się na jakość
+trafienia: od muśnięcia (`COMBAT.grazeDamage`, 25% obrażeń) po czysty cios.
+
+Kształt skali jest jedną linijką i ma znaczenie:
+
+```
+jakość = clamp(szansaTrafienia + (0,5 − rzut),  grazeDamage,  1)
+```
+
+Jakość jest **wyśrodkowana na szansie trafienia**, więc średnia jakość ciosu równa się
+tej szansie. To jest cała sztuczka: dawne `p` mówiło, jaki ułamek ciosów przechodzi
+w całości, dziś mówi, jaki ułamek obrażeń przechodzi średnio — a skoro średnia się nie
+zmienia, całe strojenie tempa walki z M3b zostaje w mocy bez ruszania obrażeń bazowych.
+Umiejętność wchodzi przez `hitChance`, czyli tak samo mocno jak wcześniej, tylko na
+skali zamiast w bramce: ostrze 10 → 80 to **+43%** średnich obrażeń ciosu.
+
+Pierwsza wersja tej skali liczyła jakość od **marginesu sukcesu** (`grazeDamage +
+(1 − grazeDamage) · (p − rzut)/p`) i została odrzucona pomiarem: podłoga muśnięcia
+obowiązywała wtedy wszystkie nieudane rzuty, więc zjadała różnicę między nowicjuszem
+a wprawnym. Ostrze 10 → 80 dawało w niej **+19%** średnich obrażeń zamiast +43%, przy
+dawnym modelu z pudłem wartym +69% ciosów, które w ogóle dochodziły. Wersja
+wyśrodkowana trzyma tempo (mediana 10 000 pojedynków 5,3 s wobec 5,1 s przed zmianą)
+i wagę umiejętności naraz.
+
+**Zasada, z której to wynika: jedynymi powodami zerowych obrażeń mają być powody, które
+gracz WIDZI** — blok, unik, brak zasięgu. Kości produkujące niewidzialne zera to ta sama
+klasa błędu co ciche ciosy z M3b: gra reaguje na wejście gracza, ale nie zostawia niczego,
+co dałoby się odczytać z ekranu. Losowe pudło przy nieruchomym celu jest mechaniką z gier
+turowych i nie pasuje do walki, która ma telegraf, blok i unik na timing. Pomiar, który
+to rozstrzygnął: przy poprawnym celowaniu rzut odpowiadał za **100% chybień**, czyli 47%
+wszystkich ciosów w nieruchomego, nieruszającego się przeciwnika.
+
+Blok redukuje obrażenia i zjada wytrzymałość proporcjonalnie do tego, co zatrzymał —
+i pęka, gdy jej zabraknie. **Unik jest nietykalnością i niczym więcej**: cios trafiony
+w okno mija, bez rzutu i bez obrażeń. Wcześniej okno robiło to samo okrężnie, dokładając
++0,45 do obrony (96% chybień) — dwa mechanizmy na jeden efekt znaczą, że nie da się
+wyregulować żadnego z nich osobno. Okno jest krótsze od odbicia, więc unik w ciemno jest
+gorszy niż unik w odpowiedzi na zamach.
+
+Konsekwencja dla dziennika: każda przyczyna niedojścia ciosu ma **własny komunikat**
+(za daleko / nad celem / obok celu), bo „patrz niżej", „podejdź" i „obróć się" to trzy
+różne polecenia, a jeden wspólny wpis nie mówi żadnego z nich. Muśnięcie też jest nazwane
+— skala jakości musi być widoczna, inaczej wraca problem, przez który zniknęło pudło.
 
 **Hp nie regeneruje się nigdy.** Regeneruje się wyłącznie wytrzymałość, a przeciążenie
 ją spowalnia (do 35% przy pełnym udźwigu i niżej już nie schodzi). Regeneracja hp
@@ -838,6 +994,62 @@ Termin przyszedł wcześniej niż zakładany M4, bo mieszkaniec lochu psuł to m
 niż byt na łące: wystarczyło, żeby wyszedł za graczem do korytarza, a po wczytaniu
 jego komora rodziła drugi komplet.
 
+### 10.7 Generacja chunka: 15–18 ms przy limicie 8 ms — **opisane, nie naprawione**
+
+Stan: `pnpm bench world` daje **15,4 ms** na chunk pustkowia i **18,1 ms** na chunk
+z lochem, przy limicie **8 ms** z `CLAUDE.md`. Ten wpis jest analizą, nie planem
+optymalizacji — bo zanim cokolwiek przyspieszymy, trzeba wiedzieć, czy problemem jest
+kod, czy liczba.
+
+**Czy to regresja, czy narastanie?** Narastanie. Ostatni pomiar w budżecie jest z M1:
+81 chunków pierścienia o promieniu 4 kosztowało **313 ms**, czyli **3,9 ms na chunk**.
+Między M1 a dziś chunk dostał trzy warstwy, wszystkie potrzebne i wszystkie płacone
+przy generacji: wycinanie lochu i schodów (M2), flood fill światła statycznego po
+komórkach (M2, §3.3) oraz stabilną fakturę z M1c. Żaden pojedynczy commit nie zrobił
+tego skoku — zrobiła go suma. Czterokrotność między 3,9 a 15,4 ms nie ma jednego
+winnego i dlatego nie ma jednej poprawki.
+
+**Czy 8 ms było realnym limitem?** Nie. Ta liczba pochodzi z M0, gdzie znaczyła coś
+innego: „`renderWorld` dla sceny referencyjnej < 8 ms (p95)", czyli **połowę budżetu
+klatki**. W M1 została przepisana do DoD jako `generateChunk < 8 ms` i stamtąd trafiła
+do tabeli budżetów w `CLAUDE.md`. Nikt jej nie wyprowadził ze strumieniowania — jest
+odziedziczona, nie uzasadniona.
+
+**Co jest realnym ograniczeniem.** `ChunkStore.update` generuje **najwyżej jeden chunk
+na klatkę** (najbliższy brakujący), więc każde wejście w nowy chunk to jedna klatka
+dłuższa o czas generacji. Przy 60 fps klatka ma 16,7 ms, więc 15–18 ms to **zgubiona
+klatka na chunk**, a nie „przekroczony budżet o 90%". Pomiar `wild.bench` „update
+podczas marszu" pokazuje to wprost: mediana 4,1 ms, ale p99 **64 ms** — czyli zacinka
+widoczna gołym okiem, dokładnie wtedy, gdy pierścień dociąga nowy chunk.
+
+**Właściwa naprawa jest więc dwuczęściowa i żadna z części nie jest optymalizacją pod
+liczbę:**
+
+1. **Zmienić limit na wyprowadzony**, a nie odziedziczony. Sensowne sformułowanie:
+   „generacja chunka nie może wydłużyć żadnej klatki powyżej progu zacinki" — co przy
+   jednym chunku na klatkę znaczy albo budżet rzędu 6–8 ms (wtedy 8 ms jest przypadkiem
+   trafione), albo rozłożenie generacji na kilka klatek i wtedy limit dotyczy **raty**,
+   nie całości.
+2. **Dopiero potem** patrzeć, co w generacji jest drogie — i mierzyć, zamiast zgadywać,
+   bo trzy warstwy są tu podejrzane po równo.
+
+Termin: **przed M4.** Miasteczko dokłada do chunka budynki i mieszkańców, więc wejście
+w M4 z nieuzasadnionym limitem znaczy, że pierwsza zacinka zostanie zdiagnozowana
+z tym samym pytaniem, co dziś.
+
+### 10.8 Rodzaj bytu nie jest zapisany w delcie — **spłata w M3c**
+
+Ciało odtwarzane z delty dostaje `kind = 0`, bo delta niesie pochodzenie, pozycję,
+hp i czas śmierci, ale nie rodzaj stworzenia. Dziś jest to poprawne przez przypadek:
+goblin jest jedynym stworzeniem w paczce, a `instantiate` robi goblina dla każdego
+pochodzenia — więc błąd jest niewidoczny.
+
+Wybuchnie przy drugim gatunku, czyli w M3c: wilk zabity i minięty wróci jako goblin.
+Spłata jest tania, ale ma dwa warianty i wybór należy do M3c: albo rodzaj idzie do
+delty (~2 B na wpis, wprost), albo wyprowadzamy go z pochodzenia tym samym haszem,
+który go stworzył (0 B, ale wiąże format delty z generatorem). Wpis istnieje po to,
+żeby ta decyzja została podjęta świadomie, a nie odkryta przez gracza.
+
 ### 10.3 Wejście do jaskini jest kompozycją, nie emergentne — do rewizji w M4
 
 Wcięcie wejściowe ma zapisaną długość ramion, zakręt, nachylenie i pas obrzeża
@@ -865,6 +1077,14 @@ Dwa etapy, rozdzielone wolumenem tekstu:
 1. **Wyciągnięcie napisów do `locale/` — przed M4.** Jest tanie, bo dziś napisów jest
    kilkadziesiąt, i domyka konwencję z `CLAUDE.md`: napis to dana z limitem długości,
    bo siatka znaków ma stałą szerokość.
+
+   **Licznik długu, żeby rósł widocznie** (stan po M3e): `apps/game/src/main.ts` ma
+   **15** wpisów do dziennika i 20 napisów widocznych dla gracza, `packages/ui`
+   — 74 (`panels.ts` 37, `panel.ts` 17, `self.ts` 11, `index.ts` 6, `log.ts` 3).
+   Ostatnia runda dołożyła trzy: „cios w powietrze — nad celem", „cios w powietrze —
+   obok celu" i „muśnięcie", a zabrała jeden („pudło"), bo pudło przestało istnieć.
+   Zwłoki **nie dołożyły żadnego** — ciało mówi obrazem, nie tekstem, i tak ma zostać.
+   Przy każdej kolejnej rundzie ta liczba idzie w górę, a koszt spłaty razem z nią.
 2. **Machineria odmiany — dopiero przy questach (M5).** Szablony **całych zdań** per
    język, rzeczowniki z przypadkami jako dane. Wcześniej nie ma na czym tego sprawdzić:
    wolumen pojawia się razem z generowanymi questami.

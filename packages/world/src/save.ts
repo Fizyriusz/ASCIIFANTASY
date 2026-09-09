@@ -7,9 +7,10 @@
  *
  * Format na dysku jest **krotkowy, nie obiektowy**: span zapisuje się jako
  * `[bottom, top, mat, capMat, flags]`, a nie jako obiekt z pięcioma nazwami pól.
- * Nazwy pól powtórzone przy każdym spanie kosztują więcej niż same liczby: przy
- * 11 990 deltach z syntetycznych 200 godzin gry wychodzi 483 kB zamiast 1319 kB,
- * czyli 41 bajtów na deltę zamiast 113 (pomiar w `save.test.ts`).
+ * Nazwy pól powtórzone przy każdym wpisie kosztują więcej niż same liczby: przy
+ * 11 990 deltach komórek i 12 000 delt bytów z syntetycznych 200 godzin gry wychodzi
+ * 832 kB zamiast 2697 kB (pomiar w `save.test.ts`). Bez tego samo dołożenie delt bytów
+ * w M3e zjadałoby 1,4 MB z twardego limitu 2 MB.
  */
 
 import { CHUNK_SIZE } from './types.js';
@@ -17,7 +18,7 @@ import { MAX_SPANS_PER_CELL } from './grid.js';
 import type { Cell, DeltaKey, SaveFile, Span } from './types.js';
 
 /** Podbijamy przy każdej niezgodnej zmianie formatu. Stare zapisy odrzucamy wprost. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 4;
 
 /** Span w postaci krotki — tak leży w pliku zapisu. */
 type SpanTuple = [number, number, number, number, number];
@@ -71,9 +72,98 @@ export interface EntitySave {
   origin: string;
 }
 
+/**
+ * Co gracz zmienił w bycie, którego już nie ma w symulacji. Byty powstają z seeda,
+ * więc zapisujemy **wyłącznie odstępstwa**: zabity zostaje zabity, ranny wraca ranny,
+ * a byt nietknięty nie zostawia śladu i przy powrocie odtworzy się identyczny.
+ *
+ * To jest ta sama zasada, co przy świecie (seed plus delty komórek) — i ten sam
+ * powód: dziennik wszystkich minięć rósłby bez ograniczeń wraz ze zwiedzonym terenem.
+ */
+export interface EntityDelta {
+  /** pochodzenie bytu: `"kx:ky#i"` na powierzchni, `"poi:komora#i"` w lochu */
+  origin: string;
+  dead: boolean;
+  hp: number;
+  /** pozycja w chwili zwolnienia; przy zabitym jest to miejsce upadku ciała */
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  /**
+   * minuta zegara gry, w której byt zginął, albo `-1`, gdy zwłoki już wygasły.
+   * Bez tego pola nie da się odtworzyć ciała przy powrocie — a to jest dokładnie
+   * ten brak, przez który zabity goblin wyglądał, jakby świat zjadał zwłoki.
+   */
+  diedAtMin: number;
+}
+
+/**
+ * Delta bytu w pliku, w trzech dlugosciach:
+ *
+ * - `[pochodzenie]` — zabity, po ktorym nie ma juz zwlok; pozycja jest nieistotna,
+ * - `[pochodzenie, hp, x, y, z, yaw]` — ranny albo przesuniety,
+ * - `[pochodzenie, 0, x, y, z, yaw, czas smierci]` — zabity, po ktorym **lezy cialo**.
+ *
+ * Ten sam powod, co przy spanach — nazwy pol powtorzone przy kazdym wpisie kosztuja
+ * wiecej niz same liczby, a delt bytow po dlugiej grze jest tyle, co delt komorek:
+ * 117 B na obiekt zamiast 40 B na krotke to roznica miedzy 1,9 MB a 1,0 MB przy
+ * twardym limicie 2 MB (pomiar w `save.test.ts`).
+ *
+ * Trzecia postac jest **przejsciowa**: po wygasnieciu zwlok wpis wraca do pierwszej,
+ * czyli plac sie tylko za ciala lezace w tej chwili. Zmierzone: swiezy trup kosztuje
+ * 43 B zamiast 14 B, a wersja „trup lezy wiecznie" dolozylaby 348 kB na 200 h gry.
+ *
+ * Pozycje zaokraglamy do centymetra, a zwrot do tysiecznej radiana: rozdzielczosc
+ * ponad ta nie jest widoczna w grze, a w pliku kosztuje kilkanascie bajtow na wpis.
+ */
+type EntityTuple =
+  | [string]
+  | [string, number, number, number, number, number]
+  | [string, number, number, number, number, number, number];
+
+function entityToWire(d: EntityDelta): EntityTuple {
+  const x = round2(d.x);
+  const y = round2(d.y);
+  const z = round2(d.z);
+  const yaw = Math.round(d.yaw * 1000) / 1000;
+  if (d.dead) {
+    return d.diedAtMin < 0 ? [d.origin] : [d.origin, 0, x, y, z, yaw, Math.round(d.diedAtMin)];
+  }
+  return [d.origin, d.hp, x, y, z, yaw];
+}
+
+function entityFromWire(e: unknown): EntityDelta | null {
+  if (!Array.isArray(e) || typeof e[0] !== 'string') return null;
+  const origin = e[0];
+  if (e.length === 1) {
+    return { origin, dead: true, hp: 0, x: 0, y: 0, z: 0, yaw: 0, diedAtMin: -1 };
+  }
+  if (e.length !== 6 && e.length !== 7) return null;
+  for (let i = 1; i < e.length; i++) if (typeof e[i] !== 'number') return null;
+  const zwloki = e.length === 7;
+  return {
+    origin,
+    dead: zwloki,
+    hp: e[1] as number,
+    x: e[2] as number,
+    y: e[3] as number,
+    z: e[4] as number,
+    yaw: e[5] as number,
+    diedAtMin: zwloki ? (e[6] as number) : -1,
+  };
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
 export interface GameSave extends SaveFile {
   player: PlayerSave;
+  /** byty **żywe w chwili zapisu** — te, które akurat są w pierścieniu wokół gracza */
   entities: EntitySave[];
+  /** odstępstwa bytów zwolnionych z symulacji */
+  entityDeltas: EntityDelta[];
 }
 
 /** Minimalny kontrakt `localStorage` — dzięki niemu testy nie potrzebują DOM-u. */
@@ -92,6 +182,8 @@ interface Wire {
   f: [string, number][];
   p: PlayerSave;
   e: EntitySave[];
+  /** delty bytów — krótka nazwa, bo tego jest najwięcej po długiej grze */
+  ed: EntityTuple[];
 }
 
 export function serialize(save: GameSave): string {
@@ -119,6 +211,7 @@ export function serialize(save: GameSave): string {
     f,
     p: save.player,
     e: save.entities,
+    ed: save.entityDeltas.map(entityToWire),
   };
   return JSON.stringify(wire);
 }
@@ -169,6 +262,14 @@ export function parse(text: string): GameSave | null {
     entities.push({ ...(e as EntitySave), origin: (e as EntitySave).origin ?? '' });
   }
 
+  const entityDeltas: EntityDelta[] = [];
+  if (Array.isArray(w.ed)) {
+    for (const e of w.ed) {
+      const d = entityFromWire(e);
+      if (d !== null) entityDeltas.push(d);
+    }
+  }
+
   return {
     version: SAVE_VERSION,
     seed: w.seed,
@@ -177,6 +278,7 @@ export function parse(text: string): GameSave | null {
     flags,
     player: w.p,
     entities,
+    entityDeltas,
   };
 }
 

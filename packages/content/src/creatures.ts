@@ -134,10 +134,53 @@ export type WildCreature = (typeof WildCreature)[keyof typeof WildCreature];
  * To są liczby balansu, więc mieszkają w contencie — groźba ma wychodzić
  * z liczebności grupy, a nie z siły pojedynczego przeciwnika.
  */
+/**
+ * Zwłoki. Ciało nie jest bytem, tylko rekordem rysowanym na gruncie: nie ma AI,
+ * nie liczy się do sufitu pierścienia i nie istnieje dla kolizji. Powód jest
+ * zmierzony — sufit pierścienia to 24 byty przy typowym zaludnieniu 9-10, więc
+ * kilkanaście trupów w jednym miejscu zatrzymywałoby rodzenie nowych w okolicy,
+ * czyli wracałby w miniaturze błąd, od którego zaczęło się M3e.
+ */
+export const CORPSE = {
+  /**
+   * minuty **zegara gry**, przez które ciało jest widoczne.
+   *
+   * UWAGA NA PRZELICZNIK: doba w grze trwa 480 sekund realnych, więc minuta zegara
+   * to 0,33 sekundy realnej, a zegar idzie **180× szybciej od realnego**. 540 minut
+   * zegara to **3 minuty realne** (9 godzin w świecie gry). Pierwsze podejście do
+   * tej stałej brzmiało „kilka minut gry" i znaczyło sekundę.
+   */
+  minutes: 540,
+  /**
+   * ile ciał naraz w pierścieniu. Po przekroczeniu najstarsze wygasa **na dobre** —
+   * trup zdjęty z ekranu, który wraca po chwili, byłby gorszy od obu wariantów.
+   */
+  cap: 12,
+} as const;
+
 export const WILD_SPAWN = {
   /** jeden na tyle klastrów jest zamieszkany */
   oneInClusters: 8,
   /** rozmiar grupy, włącznie z granicami */
   packMin: 1,
   packMax: 3,
+  /**
+   * komórki: w tym promieniu byty **istnieją** — są tickowane, widoczne i groźne.
+   * Poza nim nie ma ich wcale; nie chodzą sobie dalej, bo symulowanie pustkowia,
+   * którego nikt nie ogląda, kosztuje klatkę i niczego nie wnosi.
+   */
+  liveRadiusCells: 48,
+  /**
+   * komórki: dopiero za tym promieniem byt jest zwalniany. Histereza wobec
+   * `liveRadiusCells` — bez niej byt na granicy znikałby i wracał co klatkę,
+   * a razem z nim jego delta w zapisie.
+   */
+  releaseRadiusCells: 72,
+  /**
+   * Ile bytów naraz w pierścieniu. Sufit dotyczy **okolicy gracza**, a nie całej
+   * partii: liczony globalnie sprawiał, że po dobiciu do limitu świat przestawał
+   * rodzić byty wszędzie i na stałe (pomiar: 64 byty po 8 km marszu i ani jednego
+   * nowego przez kolejne 24 km).
+   */
+  ringCap: 24,
 } as const;

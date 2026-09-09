@@ -12,9 +12,10 @@
  * musi znać jedno i drugie — i to jest właśnie warstwa gry.
  */
 
-import { addSource, clearSources, compileSprite, lightAt } from '@rpg/core';
-import type { LightRig, SpriteFrames, SpriteInstance } from '@rpg/core';
+import { addSource, clearSources, compileSprite, drawSprites, lightAt } from '@rpg/core';
+import type { Camera, LightRig, RenderContext, Screen, SpriteFrames, SpriteInstance } from '@rpg/core';
 import {
+  CORPSE,
   DUNGEON_LIGHT,
   DUNGEON_SPAWN,
   FEEDBACK,
@@ -37,16 +38,33 @@ import {
   updateAi,
 } from '@rpg/rules';
 import type { AttackResult, Being, Intent } from '@rpg/rules';
-import type { EntitySave } from '@rpg/world';
+import type { EntityDelta, EntitySave } from '@rpg/world';
 
 /** Bok klastra rozmnażania w komórkach. Mniejszy = gęściej i drożej. */
 const CLUSTER = 16;
-/** Ile klastrów wokół gracza sprawdzamy. 3 przy boku 16 to 96 komórek zasięgu. */
-const CLUSTER_RING = 3;
-/** Górna granica bytów w symulacji; więcej i tak nie zmieści się w kadrze. */
-const MAX_BEINGS = 64;
 /** metry: wysokość oczu bytu nad gruntem, do linii wzroku i do trafień */
 const EYE_M = 1.2;
+
+/**
+ * Zwłoki: rekord na gruncie, nie byt. Nie ma postawy, AI ani ciała do kolizji —
+ * ma pozycję, rodzaj i chwilę śmierci. Wchodzi wyłącznie do listy sprite'ów.
+ */
+export interface Corpse {
+  /** pochodzenie bytu, którym był — po tym poznajemy go w deltach */
+  origin: string;
+  kind: number;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  /** minuta zegara gry, w której zginął */
+  diedAtMin: number;
+  /**
+   * jasność, z jaką rysuje się ciało — odświeżana w `step`, tak samo jak u bytów.
+   * Trup w ciemnym lochu ma być niewidoczny; to ta sama zasada, co `Material.minLum`.
+   */
+  lum: number;
+}
 
 export interface Mob {
   being: Being;
@@ -80,6 +98,20 @@ export interface MobReport {
   whiffed: boolean;
 }
 
+/**
+ * Rysuje wszystko, co bestiariusz ma do pokazania: byty i zwłoki.
+ *
+ * Wydzielone z pętli gry, bo licznik podany **osobno od listy** był dokładnie tym
+ * miejscem, w którym zniknęły ciała: gra wołała `drawSprites(..., spriteList(),
+ * bestiary.mobs.length)`, a zwłoki są na tej liście za bytami. Wszystko po drodze
+ * było zielone i nic nie było widać. Tu licznik nie ma prawa się rozjechać z listą,
+ * a test może skończyć się w tym samym miejscu, w którym kończy się gra.
+ */
+export function drawBestiary(screen: Screen, cam: Camera, ctx: RenderContext, b: Bestiary): number {
+  const lista = b.spriteList();
+  return drawSprites(screen, cam, ctx, lista, lista.length);
+}
+
 /** Skompilowane rysunki, po jednym na rodzaj bytu. Kompilacja jest jednorazowa. */
 const frames: SpriteFrames[] = wildCreatures.map((c) =>
   compileSprite(c.art, { r: c.r, g: c.g, b: c.b }, c.heightM, c.widthM),
@@ -88,11 +120,28 @@ const frames: SpriteFrames[] = wildCreatures.map((c) =>
 export class Bestiary {
   readonly mobs: Mob[] = [];
   /**
-   * Miejsca już rozpatrzone: klaster powierzchni (`"kx:ky"`) albo komora lochu
-   * (`"poi:komora"`). Bez tego byty odradzają się co klatkę, a po wczytaniu zapisu
-   * — po raz drugi obok tych, które właśnie wróciły z pliku.
+   * Byty **obecne w symulacji**, po pochodzeniu. Zastąpiło zbiór „klastrów już
+   * rozpatrzonych", który rósł monotonicznie i przez to zabijał rozmnażanie:
+   * po dobiciu do sufitu świat przestawał rodzić byty wszędzie i na stałe.
    */
-  private readonly seen = new Set<string>();
+  private readonly live = new Map<string, Mob>();
+  /**
+   * Odstępstwa bytów zwolnionych z symulacji: zabici, ranni, przesunięci. Byt
+   * nietknięty **nie zostawia wpisu** — przy powrocie odtworzy się z hasza taki sam.
+   * To ta sama zasada, co przy świecie: seed plus delty, nigdy dziennik odwiedzin.
+   */
+  private readonly deltas = new Map<string, EntityDelta>();
+  /**
+   * Ciała leżące w pierścieniu. Osobna lista, bo trup nie jest bytem: nie liczy się
+   * do sufitu pierścienia, nie chodzi przez `step` i nie zajmuje miejsca w kolizji.
+   */
+  readonly corpses: Corpse[] = [];
+  /**
+   * Minuta zegara gry, ustawiana przez pętlę gry. Bestiariusz potrzebuje jej tylko
+   * po to, żeby wiedzieć, jak stare są zwłoki — własnego czasu nie liczy, bo dwa
+   * niezależne zegary rozjeżdżają się dokładnie wtedy, gdy gra jest wczytywana.
+   */
+  private clockMin = 0;
   private readonly sprites: SpriteInstance[] = [];
   /** żagwie lochu, w którym gracz się znajduje; puste na powierzchni */
   private lights: readonly DungeonLight[] = [];
@@ -106,15 +155,24 @@ export class Bestiary {
     private readonly world: ChunkStore,
   ) {}
 
+  /** Zegar gry w minutach — jedyne źródło czasu dla wygasania zwłok. */
+  setClock(minutes: number): void {
+    this.clockMin = minutes;
+  }
+
   /**
-   * Dorzuca byty z klastrów wokół gracza. Wywoływane co klatkę, ale kosztuje
-   * cokolwiek tylko przy wejściu w nowy klaster — reszta to `Set.has`.
+   * Dorzuca byty z klastrów wokół gracza i zwalnia te, które odeszły. Wywoływane
+   * co klatkę; koszt typowej klatki to przemiatanie pierścienia klastrów haszem
+   * i `Map.has` na kandydacie, bez czytania gruntu.
    */
   spawnAround(px: number, py: number, pz: number): void {
+    // Najpierw zwalniamy to, co odeszło za daleko — inaczej sufit pierścienia
+    // liczyłby byty, których gracz dawno nie widzi, i blokował nowe.
+    this.releaseFar(px, py);
+
     // Pod stropem klastry powierzchni nie obowiązują. Bez tego warunku zejście
     // do lochu **zużywa** klastry łąki nad nim: byty stają na trawie, a gracz
-    // pod ziemią nie spotyka nikogo — i już nigdy nie spotka, bo klaster raz
-    // rozpatrzony nie wraca.
+    // pod ziemią nie spotyka nikogo.
     if (this.underground(px, py, pz)) {
       this.populateDungeon(px, py, pz);
       return;
@@ -122,40 +180,216 @@ export class Bestiary {
     this.lights = [];
     this.lochId = -1;
 
+    const ring = Math.ceil(WILD_SPAWN.liveRadiusCells / CLUSTER);
     const cx = Math.floor(px / CLUSTER);
     const cy = Math.floor(py / CLUSTER);
-    for (let dy = -CLUSTER_RING; dy <= CLUSTER_RING; dy++) {
-      for (let dx = -CLUSTER_RING; dx <= CLUSTER_RING; dx++) {
-        const kx = cx + dx;
-        const ky = cy + dy;
-        const key = `${kx}:${ky}`;
-        if (this.seen.has(key)) continue;
-        this.seen.add(key);
-        this.spawnCluster(kx, ky, pz);
+    for (let dy = -ring; dy <= ring; dy++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        this.spawnCluster(cx + dx, cy + dy, px, py);
       }
     }
   }
 
-  private spawnCluster(kx: number, ky: number, pz: number): void {
+  /**
+   * Zwalnia byty poza promieniem. Promień zwolnienia jest większy od promienia
+   * życia (histereza), bo byt na granicy inaczej znikałby i wracał co klatkę.
+   */
+  private releaseFar(px: number, py: number): void {
+    const r2 = WILD_SPAWN.releaseRadiusCells * WILD_SPAWN.releaseRadiusCells;
+    for (let i = this.mobs.length - 1; i >= 0; i--) {
+      const m = this.mobs[i]!;
+      const dx = m.being.x - px;
+      const dy = m.being.y - py;
+      if (dx * dx + dy * dy <= r2) continue;
+      this.release(m);
+      this.mobs.splice(i, 1);
+    }
+    // Ciała zwalniamy tak samo: wszystko, co o nich wiemy, siedzi już w delcie.
+    for (let i = this.corpses.length - 1; i >= 0; i--) {
+      const c = this.corpses[i]!;
+      const dx = c.x - px;
+      const dy = c.y - py;
+      if (dx * dx + dy * dy > r2) this.corpses.splice(i, 1);
+    }
+  }
+
+  /** Zdejmuje byt z symulacji, zapisując deltę tylko wtedy, gdy jest co zapisać. */
+  private release(m: Mob): void {
+    this.live.delete(m.origin);
+    const b = m.being;
+    const martwy = b.actor.stance === Stance.Dead;
+    const ranny = b.actor.hp < b.actor.maxHp;
+    if (!martwy && !ranny) return; // nietknięty: odtworzy się z hasza
+    this.deltas.set(m.origin, {
+      origin: m.origin,
+      dead: martwy,
+      hp: b.actor.hp,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      yaw: b.yaw,
+      // Byt zwalniany martwy, ale jeszcze nieprzerobiony na zwłoki (zdarza się przy
+      // zapisie tuż po ciosie): zwłoki zaczynają leżeć od teraz.
+      diedAtMin: martwy ? this.clockMin : -1,
+    });
+  }
+
+  /**
+   * Zamienia zabity byt na zwłoki. Robimy to dopiero, gdy zgaśnie rozbłysk trafienia,
+   * bo to jest ostatni ciosowi należny kadr sprzężenia zwrotnego — a nie od razu,
+   * bo trup jako byt zjada sufit pierścienia.
+   */
+  private toCorpse(m: Mob): void {
+    const b = m.being;
+    this.live.delete(m.origin);
+    this.deltas.set(m.origin, {
+      origin: m.origin,
+      dead: true,
+      hp: 0,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      yaw: b.yaw,
+      diedAtMin: this.clockMin,
+    });
+    this.addCorpse({
+      origin: m.origin,
+      kind: b.kind,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      yaw: b.yaw,
+      diedAtMin: this.clockMin,
+      lum: b.lum,
+    });
+  }
+
+  /**
+   * Kładzie ciało, pilnując sufitu. Ponad sufit wygasa **najstarsze i na dobre**:
+   * jego delta wraca do postaci „zabity, po którym nic nie zostało", więc ciało
+   * nie ma prawa wrócić przy następnym wejściu w pierścień.
+   */
+  private addCorpse(c: Corpse): void {
+    this.corpses.push(c);
+    while (this.corpses.length > CORPSE.cap) {
+      let naj = 0;
+      for (let i = 1; i < this.corpses.length; i++) {
+        if (this.corpses[i]!.diedAtMin < this.corpses[naj]!.diedAtMin) naj = i;
+      }
+      const stary = this.corpses[naj]!;
+      this.expireCorpse(stary.origin);
+      this.corpses.splice(naj, 1);
+    }
+  }
+
+  /** Zwłoki wygasłe: delta zostaje (zabity zostaje zabity), ale bez ciała i pozycji. */
+  private expireCorpse(origin: string): void {
+    const d = this.deltas.get(origin);
+    if (d === undefined) return;
+    this.deltas.set(origin, {
+      origin,
+      dead: true,
+      hp: 0,
+      x: 0,
+      y: 0,
+      z: 0,
+      yaw: 0,
+      diedAtMin: -1,
+    });
+  }
+
+  /** Czy zwłoki z tej delty jeszcze leżą. Liczone zegarem gry, nie realnym. */
+  private corpseFresh(d: EntityDelta): boolean {
+    return d.dead && d.diedAtMin >= 0 && this.clockMin - d.diedAtMin < CORPSE.minutes;
+  }
+
+  /** Ile bytów jest w pierścieniu życia — sufit dotyczy okolicy, nie całej partii. */
+  private inRing(px: number, py: number): number {
+    const r2 = WILD_SPAWN.liveRadiusCells * WILD_SPAWN.liveRadiusCells;
+    let n = 0;
+    for (const m of this.mobs) {
+      const dx = m.being.x - px;
+      const dy = m.being.y - py;
+      if (dx * dx + dy * dy <= r2) n++;
+    }
+    return n;
+  }
+
+  /**
+   * Wstawia byt, jeśli wolno: nie ma go jeszcze w symulacji, nie zginął wcześniej
+   * i pierścień nie jest pełny. Delta rannego wraca razem z nim.
+   */
+  private instantiate(
+    origin: string,
+    x: number,
+    y: number,
+    z: number,
+    yaw: number,
+    px: number,
+    py: number,
+  ): boolean {
+    if (this.live.has(origin)) return false;
+    const delta = this.deltas.get(origin);
+    if (delta !== undefined && delta.dead) {
+      // Zabity nie wraca jako byt, ale dopóki trwa okno, wraca jako ciało — i to
+      // jest cała różnica między „zwłoki leżą" a „świat zjadł trupa".
+      if (this.corpseFresh(delta) && !this.corpses.some((c) => c.origin === origin)) {
+        this.addCorpse({
+          origin,
+          kind: 0,
+          x: delta.x,
+          y: delta.y,
+          z: delta.z,
+          yaw: delta.yaw,
+          diedAtMin: delta.diedAtMin,
+          lum: 0.5, // do pierwszego `step`, który policzy prawdziwe światło
+        });
+      }
+      return false;
+    }
+    if (this.inRing(px, py) >= WILD_SPAWN.ringCap) return false;
+
+    const m = delta === undefined
+      ? this.makeGoblin(x, y, z, yaw, origin)
+      : this.makeGoblin(delta.x, delta.y, delta.z, delta.yaw, origin);
+    if (delta !== undefined) m.being.actor.hp = delta.hp;
+    this.mobs.push(m);
+    this.live.set(origin, m);
+    return true;
+  }
+
+  private spawnCluster(kx: number, ky: number, px: number, py: number): void {
     const h = h32(this.seed ^ 0x60b1, kx, ky, 0) >>> 0;
     // Gęstość i rozmiar grupy są w contencie, bo to liczby balansu: groźba ma
     // wychodzić z liczebności, a nie z siły pojedynczego przeciwnika.
     if (h % WILD_SPAWN.oneInClusters !== 0) return;
     const rozpietosc = WILD_SPAWN.packMax - WILD_SPAWN.packMin + 1;
     const count = WILD_SPAWN.packMin + ((h >>> 8) % rozpietosc);
+    const r2 = WILD_SPAWN.liveRadiusCells * WILD_SPAWN.liveRadiusCells;
+
     for (let i = 0; i < count; i++) {
-      if (this.mobs.length >= MAX_BEINGS) return;
       const hp = h32(h, i, 0, 0) >>> 0;
+      const origin = `${kx}:${ky}#${i}`;
+      // Byt już żywy sprawdzamy **przed** czytaniem gruntu: to jest przypadek
+      // typowy (klaster pod nogami gracza wraca co klatkę), a `surfaceHeight`
+      // jest tu najdroższą operacją w całej pętli.
+      if (this.live.has(origin)) continue;
       const x = kx * CLUSTER + (hp % CLUSTER) + 0.5;
       const y = ky * CLUSTER + ((hp >>> 8) % CLUSTER) + 0.5;
-      // Pułap szukania gruntu to wysokość gracza plus trzy metry, a nie
-      // nieskończoność: pod ziemią „najwyższa czapka" to strop nad jaskinią,
-      // więc bez tego wszystkie gobliny lądują na łące nad lochem.
-      const z = this.world.surfaceHeight(Math.floor(x), Math.floor(y), pz + 3);
+      // poza pierścieniem życia byt nie istnieje — nie ma po co liczyć jego gruntu
+      const dx = x - px;
+      const dy = y - py;
+      if (dx * dx + dy * dy > r2) continue;
+
+      // Grunt czytamy **z komórki kandydata**, bez pułapu liczonego od gracza.
+      // Pułap wszedł w M3, żeby byty nie lądowały na łące nad lochem — ale od M3d
+      // podziemia mają własną ścieżkę, a na powierzchni pułap odrzucał każdego,
+      // kto stał wyżej niż trzy metry nad graczem, i klaster przepadał na zawsze.
+      const z = this.world.surfaceHeight(Math.floor(x), Math.floor(y), 1e6);
       if (!Number.isFinite(z)) continue;
       // nie stawiamy nikogo tam, gdzie nie zmieści się jego własna sylwetka
       if (this.world.blocks(Math.floor(x), Math.floor(y), z + 0.1, z + 1.6)) continue;
-      this.mobs.push(this.makeGoblin(x, y, z, ((hp >>> 16) % 628) / 100, `${kx}:${ky}`));
+      this.instantiate(origin, x, y, z, ((hp >>> 16) % 628) / 100, px, py);
     }
   }
 
@@ -183,15 +417,16 @@ export class Bestiary {
         this.usedLights = new Uint8Array(this.lights.length);
       }
     }
-    for (const d of dungeonDwellers(this.seed, graf, DUNGEON_SPAWN)) {
-      if (this.mobs.length >= MAX_BEINGS) return;
-      const key = `${graf.poiId}:${d.roomIndex}:${d.x}:${d.y}`;
-      if (this.seen.has(key)) continue;
-      this.seen.add(key);
+    const mieszkancy = dungeonDwellers(this.seed, graf, DUNGEON_SPAWN);
+    for (let i = 0; i < mieszkancy.length; i++) {
+      const d = mieszkancy[i]!;
       const z = this.world.surfaceHeight(Math.floor(d.x), Math.floor(d.y), d.z + 2);
       if (!Number.isFinite(z)) continue;
       if (this.world.blocks(Math.floor(d.x), Math.floor(d.y), z + 0.1, z + 1.6)) continue;
-      this.mobs.push(this.makeGoblin(d.x, d.y, z, 0, `${graf.poiId}:${d.roomIndex}`));
+      // Pochodzenie niesie **indeks mieszkańca**, nie samą komorę: bez tego trzy
+      // gobliny z jednej komory dzieliłyby jedną deltę i zabicie jednego znaczyłoby
+      // zabicie wszystkich.
+      this.instantiate(`${graf.poiId}:${d.roomIndex}#${i}`, d.x, d.y, z, 0, px, py);
     }
   }
 
@@ -293,6 +528,7 @@ export class Bestiary {
         continue;
       }
 
+
       b.lum = this.lumAt(rig, b.x, b.y, b.z);
       updateAi(b, player, this.world, dtMs, rng, m.intent, CELL_METERS);
       this.moveBeing(b, m.intent, dtMs);
@@ -315,6 +551,18 @@ export class Bestiary {
         }
       }
       animate(b, m.intent, dtMs);
+    }
+
+    // Ciała nie chodzą i nie walczą, ale muszą reagować na światło: pochodnia
+    // wniesiona nad trupa ma go pokazać, a odejście z nią — schować.
+    for (const c of this.corpses) c.lum = this.lumAt(rig, c.x, c.y, c.z);
+
+    // Zabici schodzą z listy bytów, gdy zgaśnie rozbłysk ostatniego ciosu.
+    for (let i = this.mobs.length - 1; i >= 0; i--) {
+      const m = this.mobs[i]!;
+      if (m.being.actor.stance !== Stance.Dead || m.flashMs > 0) continue;
+      this.toCorpse(m);
+      this.mobs.splice(i, 1);
     }
   }
 
@@ -403,6 +651,21 @@ export class Bestiary {
         });
       }
     }
+    // Ciała: ta sama klatka `Death`, co przy bycie tuż po śmierci — rysunek jest
+    // kupką przy ziemi, więc trup nie stoi, tylko leży.
+    for (const c of this.corpses) {
+      const f = frames[c.kind];
+      if (f === undefined) continue;
+      this.sprites.push({
+        x: c.x,
+        y: c.y,
+        baseZ: c.z,
+        yaw: c.yaw,
+        frame: Frame.Death,
+        lum: c.lum,
+        frames: f,
+      });
+    }
     return this.sprites;
   }
 
@@ -426,17 +689,20 @@ export class Bestiary {
   }
 
   /**
-   * Przywraca byty z zapisu i **oznacza ich klastry jako rozpatrzone**. Bez tego
-   * kroku pierwsze `spawnAround` po wczytaniu dorzuciłoby drugi komplet goblinów
-   * do tych, które właśnie wróciły z pliku — łącznie z tymi, które gracz zabił.
+   * Przywraca byty z zapisu: żywe wprost, zwolnione jako delty. Pochodzenie każdego
+   * wraca do rejestru żywych, bo bez tego pierwsze `spawnAround` po wczytaniu
+   * dorzuciłoby drugi komplet goblinów do tych, które właśnie wróciły z pliku.
    *
-   * Klaster odtwarzamy z pozycji bytu, a nie z zapisu: byt, który odbiegł od swojego
-   * klastra, zostawia go nieoznaczonym i wtedy klaster odradza się przy wczytaniu.
-   * To jest znany dług, opisany w §10.6 architektury.
+   * Kolejność ma znaczenie: delty wchodzą **przed** bytami żywymi, żeby zabity
+   * z pliku nie mógł zostać odtworzony jako żywy przez pomyłkę w danych.
    */
-  restore(list: readonly EntitySave[]): void {
+  restore(list: readonly EntitySave[], deltas: readonly EntityDelta[]): void {
     this.mobs.length = 0;
+    this.corpses.length = 0;
+    this.live.clear();
+    this.deltas.clear();
     this.lochId = -1;
+    for (const d of deltas) this.deltas.set(d.origin, d);
     for (const e of list) {
       const m = this.makeGoblin(e.x, e.y, e.z, e.yaw, e.origin);
       m.being.actor.hp = e.hp;
@@ -445,8 +711,21 @@ export class Bestiary {
       this.mobs.push(m);
       // Pochodzenie idzie z zapisu, a nie z pozycji: byt, który wyszedł ze swojej
       // komory za graczem, inaczej odrodziłby ją po wczytaniu (dług 10.6).
-      if (e.origin !== '') this.seen.add(e.origin);
+      if (e.origin !== '') this.live.set(e.origin, m);
     }
+  }
+
+  /**
+   * Delty do zapisu: wszystko, co gracz zmienił w bytach już zwolnionych. Zwłoki,
+   * których okno minęło, tracą przy okazji pozycję i czas — po co plik ma nosić
+   * miejsce upadku ciała, którego nikt już nie zobaczy. Zabity zostaje zabity.
+   */
+  deltasToSave(): EntityDelta[] {
+    const out: EntityDelta[] = [];
+    for (const d of this.deltas.values()) {
+      out.push(this.corpseFresh(d) || !d.dead ? d : { ...d, x: 0, y: 0, z: 0, yaw: 0, diedAtMin: -1 });
+    }
+    return out;
   }
 
   /**

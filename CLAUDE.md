@@ -254,6 +254,25 @@ Te błędy już raz kosztowały czas. Nie powtarzamy ich:
 Render jest tekstem, więc regresja graficzna jest **diffem tekstowym**. To przewaga,
 której nie ma żaden silnik 3D — używamy jej agresywnie:
 
+**Test ma kończyć się na SKUTKU, nie krok przed nim.** Jeśli test sprawdza, że coś
+trafiło do struktury pośredniej — do listy, do bufora, do pola obiektu — ma iść o jeden
+krok dalej i sprawdzić, że **skutek wystąpił**: że komórka bufora znaków jest niepusta,
+że hp spadło, że w dzienniku pojawił się wpis.
+
+Ta reguła jest tu dlatego, że cztery razy w tym projekcie zielony test opisywał zepsutą
+grę i za każdym razem miał tę samą postać:
+
+| test | kończył się na | zepsute było |
+|---|---|---|
+| `serviceSwing` w M3b | „zamach się rozstrzygnął" | cios wychodził cicho, bez wyniku |
+| `aim-cost` w M3f | stracie 100% przy patrzeniu przed siebie | założenie, że gracz patrzy w dół |
+| `encounter` w M3f | „ktoś zginął" | ginął gracz, bo jego ciosy nie dochodziły |
+| `corpse` w M3e | „ciało jest na liście sprite'ów" | licznik obcinał listę, ekran był pusty |
+
+**Do tego test negatywny: przywróć błąd i potwierdź, że test się czerwieni.** Test,
+który nigdy nie był czerwony z właściwego powodu, jest hipotezą, a nie asercją —
+sprawdzenie zajmuje minutę i jest jedynym dowodem, że test pilnuje tego, co myślisz.
+
 - **Snapshot ASCII** — headless render ustalonej sceny → porównanie z `tools/harness/golden/*.txt`.
   Każda zmiana w rendererze musi mieć snapshot.
 - **Determinizm** — `generateChunk(seed, cx, cy)` wywołane 1000 razy daje identyczny hash.
